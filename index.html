@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Markdown Note Reader</title>
+    <meta
+      name="description"
+      content="A beautiful, minimalist web app for reading Markdown files with elegant typography and syntax highlighting."
+    />
+
+    <!-- Highlight.js theme (light for now; can switch for dark mode later) -->
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/highlight.js@11.8.0/styles/atom-one-light.min.css"
+    />
+
+    <!-- App styles -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app-header">
+        <div class="app-title">
+          <span class="app-title-icon" aria-hidden="true">📖</span>
+          <div class="app-title-text">
+            <h1>Markdown Note Reader</h1>
+            <p class="app-subtitle">Open and read your Markdown notes beautifully.</p>
+          </div>
+        </div>
+
+        <div class="app-controls">
+          <!-- Theme toggle placeholder (Phase 6) -->
+          <button
+            type="button"
+            class="theme-toggle"
+            aria-label="Toggle theme"
+            disabled
+            title="Dark mode coming soon"
+          >
+            Light
+          </button>
+
+          <label class="file-button">
+            <input
+              id="file-input"
+              type="file"
+              accept=".md,.markdown,.txt,text/markdown,text/plain"
+              hidden
+            />
+            <span class="file-button-label">📁 Open File</span>
+          </label>
+        </div>
+      </header>
+
+      <main class="app-main">
+        <section
+          id="drop-zone"
+          class="drop-zone"
+          aria-label="Markdown file drop zone"
+        >
+          <div class="drop-zone-inner">
+            <p class="drop-zone-title">Drag a markdown file here</p>
+            <p class="drop-zone-or">or</p>
+            <p class="drop-zone-action">click “Open File” to browse</p>
+            <p class="drop-zone-hint">Supported: .md, .markdown, .txt — max 5&nbsp;MB</p>
+          </div>
+        </section>
+
+        <section class="file-meta" aria-live="polite">
+          <p id="file-info" class="file-info file-info--empty">
+            No file loaded.
+          </p>
+          <p id="file-error" class="file-error" role="status" aria-live="polite"></p>
+        </section>
+
+        <section
+          id="preview"
+          class="preview"
+          aria-label="Rendered markdown preview"
+        >
+          <article class="preview-placeholder">
+            <h2>Welcome</h2>
+            <p>
+              Load a markdown file to see it rendered here with
+              <strong>beautiful typography</strong> and
+              <code>syntax-highlighted</code> code blocks.
+            </p>
+            <pre><code class="language-markdown"># Example markdown
+
+This is a paragraph with **bold** and *italic* text.
+
+- Item one
+- Item two
+
+```javascript
+const hello = "world";
+console.log(hello);
+```</code></pre>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <!-- marked.js (Markdown parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <!-- highlight.js (syntax highlighting) -->
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.8.0/build/highlight.min.js"></script>
+
+    <!-- App logic -->
+    <script src="app.js"></script>
+  </body>
+  </html>
+
