@@ -9,3 +9,4 @@ build/
 # Git worktrees (if used)
 .worktrees/
 
+.worktrees
