@@ -10,6 +10,7 @@ const appState = {
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_SEARCH_LENGTH = 100; // Prevent DoS from massive search queries
 const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"];
 const ALLOWED_MIME_TYPES = ["text/plain", "text/markdown", ""];
 
@@ -73,11 +74,8 @@ function updateFileInfo(file) {
   }
 
   fileInfoEl.classList.remove("file-info--empty");
-  fileInfoEl.innerHTML = `
-    <strong>${file.name}</strong>
-    &nbsp;·&nbsp;
-    ${formatFileSize(file.size)}
-  `;
+  // Use textContent to safely display filename (prevents XSS)
+  fileInfoEl.textContent = `${file.name} · ${formatFileSize(file.size)}`;
 }
 
 function validateFile(file) {
@@ -161,6 +159,14 @@ function performSearch(query) {
   appState.search.query = query.trim();
   appState.search.currentMatchIndex = -1;
   appState.search.matches = [];
+
+  // Prevent DoS attack: reject searches longer than MAX_SEARCH_LENGTH
+  if (appState.search.query.length > MAX_SEARCH_LENGTH) {
+    searchInfoEl.textContent = "Search too long (max 100 characters)";
+    appState.search.isActive = false;
+    updateSearchNav();
+    return;
+  }
 
   if (!appState.search.query) {
     clearSearch();
@@ -400,6 +406,9 @@ if (searchClearBtn) {
 
 // Global keyboard shortcut for search: Ctrl+F or Cmd+F
 document.addEventListener("keydown", (event) => {
+  // Security: Only respond to genuine user keyboard events, not synthetic ones
+  if (!event.isTrusted) return;
+
   if ((event.ctrlKey || event.metaKey) && event.key === "f") {
     event.preventDefault();
     if (appState.currentFile && searchInput) {
