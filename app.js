@@ -5,12 +5,13 @@ const appState = {
     query: "",
     matches: [],
     currentMatchIndex: -1,
-    isActive: false,
   },
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_SEARCH_LENGTH = 100; // Prevent DoS from massive search queries
+const MAX_MATCHES = 1000; // Prevent memory crash from too many matches
+const SEARCH_DEBOUNCE_MS = 250; // Wait 250ms after user stops typing
 const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"];
 const ALLOWED_MIME_TYPES = ["text/plain", "text/markdown", ""];
 
@@ -27,6 +28,9 @@ const searchInfoEl = document.getElementById("search-info");
 const searchPrevBtn = document.getElementById("search-prev-btn");
 const searchNextBtn = document.getElementById("search-next-btn");
 const searchClearBtn = document.getElementById("search-clear-btn");
+
+// Search debouncing
+let searchTimeout;
 
 // Configure marked + highlight.js
 if (window.marked) {
@@ -85,13 +89,13 @@ function validateFile(file) {
   }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    showError("File is too large. Maximum size is 5 MB.");
+    showError("File upload failed. Please try a smaller file.");
     return false;
   }
 
   const ext = getFileExtension(file.name);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
-    showError("Unsupported file type. Use .md, .markdown, or .txt.");
+    showError("File upload failed. Please try a supported format.");
     return false;
   }
 
@@ -163,7 +167,6 @@ function performSearch(query) {
   // Prevent DoS attack: reject searches longer than MAX_SEARCH_LENGTH
   if (appState.search.query.length > MAX_SEARCH_LENGTH) {
     searchInfoEl.textContent = "Search too long (max 100 characters)";
-    appState.search.isActive = false;
     updateSearchNav();
     return;
   }
@@ -192,6 +195,14 @@ function performSearch(query) {
     let match;
 
     while ((match = regex.exec(text)) !== null) {
+      // Limit matches to prevent memory exhaustion
+      if (appState.search.matches.length >= MAX_MATCHES) {
+        searchInfoEl.textContent = `${MAX_MATCHES}+ matches (showing first 1000)`;
+        highlightMatches();
+        updateSearchNav();
+        return;
+      }
+
       appState.search.matches.push({
         node: node,
         index: match.index,
@@ -201,19 +212,16 @@ function performSearch(query) {
   }
 
   if (appState.search.matches.length > 0) {
-    appState.search.isActive = true;
     highlightMatches();
     navigateToMatch(0);
   } else {
     searchInfoEl.textContent = "No matches";
-    appState.search.isActive = false;
   }
 
   updateSearchNav();
 }
 
-function highlightMatches() {
-  // Remove existing highlights
+function removeAllHighlights() {
   previewEl.querySelectorAll(".search-highlight").forEach((mark) => {
     const parent = mark.parentNode;
     while (mark.firstChild) {
@@ -221,6 +229,11 @@ function highlightMatches() {
     }
     parent.removeChild(mark);
   });
+}
+
+function highlightMatches() {
+  // Remove existing highlights
+  removeAllHighlights();
 
   // Create new highlights
   appState.search.matches.forEach((match, idx) => {
@@ -243,7 +256,6 @@ function highlightMatches() {
         ? "search-highlight search-highlight--active"
         : "search-highlight";
     mark.textContent = matchText;
-    mark.dataset.matchIndex = idx;
     container.appendChild(mark);
 
     if (afterText) {
@@ -251,13 +263,14 @@ function highlightMatches() {
     }
 
     node.parentNode.replaceChild(container, node);
-    // Update node reference for potential future use
     appState.search.matches[idx].node = mark;
   });
 }
 
 function navigateToMatch(direction) {
   if (appState.search.matches.length === 0) return;
+
+  const prevIndex = appState.search.currentMatchIndex;
 
   if (direction === 0) {
     // Jump to first match
@@ -274,14 +287,19 @@ function navigateToMatch(direction) {
         : appState.search.currentMatchIndex - 1;
   }
 
-  // Update highlights
-  previewEl.querySelectorAll(".search-highlight").forEach((mark, idx) => {
-    mark.classList.remove("search-highlight--active");
-    if (idx === appState.search.currentMatchIndex) {
-      mark.classList.add("search-highlight--active");
-      mark.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Efficiently update only the affected highlight elements
+  if (prevIndex >= 0 && prevIndex < appState.search.matches.length) {
+    const prevMark = appState.search.matches[prevIndex].node;
+    if (prevMark && prevMark.classList) {
+      prevMark.classList.remove("search-highlight--active");
     }
-  });
+  }
+
+  const currentMark = appState.search.matches[appState.search.currentMatchIndex].node;
+  if (currentMark && currentMark.classList) {
+    currentMark.classList.add("search-highlight--active");
+    currentMark.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   updateSearchInfo();
 }
@@ -308,19 +326,12 @@ function clearSearch() {
   appState.search.query = "";
   appState.search.matches = [];
   appState.search.currentMatchIndex = -1;
-  appState.search.isActive = false;
 
   if (searchInput) searchInput.value = "";
   searchInfoEl.textContent = "";
 
   // Remove highlights
-  previewEl.querySelectorAll(".search-highlight").forEach((mark) => {
-    const parent = mark.parentNode;
-    while (mark.firstChild) {
-      parent.insertBefore(mark.firstChild, mark);
-    }
-    parent.removeChild(mark);
-  });
+  removeAllHighlights();
 
   updateSearchNav();
 }
@@ -370,7 +381,10 @@ if (dropZone) {
 // Search event wiring
 if (searchInput) {
   searchInput.addEventListener("input", (event) => {
-    performSearch(event.target.value);
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+      performSearch(event.target.value);
+    }, SEARCH_DEBOUNCE_MS);
   });
 
   searchInput.addEventListener("keydown", (event) => {
