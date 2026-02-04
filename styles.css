@@ -354,6 +354,98 @@ body {
   margin: 1.2em 0;
 }
 
+/* Search functionality styles */
+.search-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 180px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+}
+
+.search-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: #f9f9f9;
+}
+
+.search-info {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 50px;
+}
+
+.search-nav {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.search-nav-btn,
+.search-clear-btn {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease-out, border-color 0.15s ease-out;
+  user-select: none;
+}
+
+.search-nav-btn:hover:not(:disabled),
+.search-clear-btn:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #d4d4d4;
+}
+
+.search-nav-btn:active:not(:disabled),
+.search-clear-btn:active:not(:disabled) {
+  background: #ddd;
+}
+
+.search-nav-btn:disabled,
+.search-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Highlight styling */
+.search-highlight {
+  background-color: #ffeb3b;
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: background-color 0.15s ease-out;
+}
+
+.search-highlight--active {
+  background-color: #ff9800;
+  color: white;
+  font-weight: 500;
+}
+
 @media (max-width: 720px) {
   body {
     padding: 16px 10px;
@@ -374,8 +466,24 @@ body {
     justify-content: flex-start;
   }
 
+  .search-container {
+    align-self: stretch;
+    width: 100%;
+  }
+
+  .search-input {
+    min-width: 120px;
+  }
+
+  .search-nav-btn,
+  .search-clear-btn {
+    padding: 5px 8px;
+    font-size: 0.8rem;
+  }
+
   .preview {
     max-height: none;
+    padding: 18px 12px;
   }
 }
 

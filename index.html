@@ -54,6 +54,48 @@
             <span class="file-button-label">📁 Open File</span>
           </label>
         </div>
+
+        <!-- Search bar (wraps to separate row on mobile) -->
+        <div class="search-container">
+          <input
+            type="text"
+            id="search-input"
+            class="search-input"
+            placeholder="Search in note... (Ctrl+F)"
+            aria-label="Search in markdown note"
+            disabled
+          />
+          <span id="search-info" class="search-info"></span>
+          <div class="search-nav">
+            <button
+              id="search-prev-btn"
+              class="search-nav-btn"
+              aria-label="Previous match"
+              title="Shift+Enter"
+              disabled
+            >
+              ↑
+            </button>
+            <button
+              id="search-next-btn"
+              class="search-nav-btn"
+              aria-label="Next match"
+              title="Enter"
+              disabled
+            >
+              ↓
+            </button>
+            <button
+              id="search-clear-btn"
+              class="search-clear-btn"
+              aria-label="Clear search"
+              title="Escape"
+              disabled
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       </header>
 
       <main class="app-main">
