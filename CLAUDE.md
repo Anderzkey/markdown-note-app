@@ -55,12 +55,19 @@ This file provides guidance to Claude Code when working with the Markdown Note T
 
 ```
 Markdown Note Taking App/
-├── CLAUDE.md                 # This file
-├── index.html               # Main HTML file
-├── styles.css               # Custom styling
-├── app.js                   # Main JavaScript logic
-├── plan.md                  # Development plan (to be created)
-└── README.md                # Project documentation
+├── CLAUDE.md                              # This file (AI guidelines)
+├── PLAN.md                                # Main development plan
+├── README.md                              # Project documentation
+├── index.html                             # Main HTML file
+├── styles.css                             # Custom styling
+├── app.js                                 # Main JavaScript logic
+├── plans/                                 # Feature plans (git-tracked)
+│   ├── feature-1-search.md               # Search functionality
+│   ├── feature-2-tags.md                 # Tags and filtering
+│   ├── feature-3-pdf-export.md           # PDF export
+│   ├── markdown-note-app.md              # Original project plan
+│   └── wip-research-markdown-app.md      # Research notes
+└── .worktrees/                            # Git worktrees for features
 ```
 
 ---
@@ -105,14 +112,49 @@ All should be loaded from CDN to keep deployment simple.
 
 ---
 
-## 🔄 Session Persistence
+## 🔄 Session Persistence & Planning Workflow
 
-Research and planning should be saved to:
-- `plan.md` - Final development plan
-- `research/` folder (if needed) - Any research findings
-- `wip-*.md` files (if doing extensive research) - Work-in-progress notes
+**CRITICAL:** All plans and documentation must be saved to the git repository, not local conversation context.
 
-Never rely only on conversation context.
+### Where to Save Plans
+
+**Feature Plans** → `plans/feature-N-<name>.md`
+- Example: `plans/feature-1-search.md`
+- Each feature gets one file
+- Commit to git immediately after creation
+- Format: Include requirements, implementation steps, testing checklist
+
+**Research/Analysis** → `plans/wip-<topic>.md`
+- Work-in-progress notes during investigation
+- Convert to feature plan once finalized
+- Delete after converting to feature plan
+
+**Main Development Plan** → `PLAN.md` (root directory)
+- Overall project roadmap
+- Phase breakdown
+- Architecture decisions
+
+### Workflow for New Features
+
+1. **Planning Phase**
+   - Create `plans/feature-N-<name>.md`
+   - Include: overview, requirements, implementation steps, testing checklist
+   - Add to git immediately: `git add plans/feature-*.md`
+
+2. **Development Phase**
+   - Create git worktree for isolated development
+   - Reference feature plan throughout implementation
+   - Test against acceptance criteria
+
+3. **Review Phase**
+   - Commit changes with clear messages
+   - Merge worktree back to main
+   - Update main PLAN.md if needed
+
+4. **Persistence**
+   - All plans stay in git repository
+   - Accessible across all sessions
+   - Searchable in code editor
 
 ---
 
