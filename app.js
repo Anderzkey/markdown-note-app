@@ -30,6 +30,7 @@ const dropZone = document.getElementById("drop-zone");
 const fileInfoEl = document.getElementById("file-info");
 const fileErrorEl = document.getElementById("file-error");
 const previewEl = document.getElementById("preview");
+const exportPdfBtn = document.getElementById("export-pdf-btn");
 
 // Search DOM references
 const searchInput = document.getElementById("search-input");
@@ -97,12 +98,16 @@ function updateFileInfo(file) {
   if (!file) {
     fileInfoEl.textContent = "No file loaded.";
     fileInfoEl.classList.add("file-info--empty");
+    // Disable export button
+    if (exportPdfBtn) exportPdfBtn.disabled = true;
     return;
   }
 
   fileInfoEl.classList.remove("file-info--empty");
   // Use textContent to safely display filename (prevents XSS)
   fileInfoEl.textContent = `${file.name} · ${formatFileSize(file.size)}`;
+  // Enable export button
+  if (exportPdfBtn) exportPdfBtn.disabled = false;
 }
 
 function validateFile(file) {
@@ -144,6 +149,38 @@ function renderMarkdown(content) {
     previewEl.querySelectorAll("pre code").forEach((block) => {
       hljs.highlightElement(block);
     });
+  }
+}
+
+/**
+ * Exports the current markdown file as a PDF using browser print dialog
+ * Sets document title to derived PDF filename
+ */
+function exportToPDF() {
+  // Guard: Ensure file is loaded
+  if (!appState.currentFile) {
+    showError("No file loaded to export.");
+    return;
+  }
+
+  try {
+    // Derive PDF filename from markdown filename
+    const pdfFilename = appState.currentFile.name.replace(/\.(md|markdown|txt)$/i, '.pdf');
+
+    // Set document title (used as default filename in print dialog)
+    const originalTitle = document.title;
+    document.title = pdfFilename;
+
+    // Trigger print dialog
+    window.print();
+
+    // Restore original title after print
+    document.title = originalTitle;
+    clearError();
+
+  } catch (err) {
+    showError("Failed to open print dialog. Please try again.");
+    console.error("PDF export error:", err);
   }
 }
 
@@ -934,6 +971,11 @@ if (searchClearBtn) {
     clearSearch();
     searchInput?.focus();
   });
+}
+
+// Export PDF button wiring
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener("click", exportToPDF);
 }
 
 // Global keyboard shortcut for search: Ctrl+F or Cmd+F

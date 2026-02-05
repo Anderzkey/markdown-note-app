@@ -134,6 +134,35 @@ body {
   white-space: nowrap;
 }
 
+.export-button {
+  border-radius: 999px;
+  padding: 8px 16px;
+  border: 1px solid var(--color-border-subtle);
+  background: #f4f4f5;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.export-button:hover:not(:disabled) {
+  background: #e4e4e7;
+  border-color: #d4d4d8;
+  transform: translateY(-1px);
+}
+
+.export-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.export-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .app-main {
   margin-top: 8px;
   display: flex;
@@ -814,6 +843,103 @@ body {
     width: 100%;
     max-width: 100%;
     max-height: 60vh;
+  }
+}
+
+/* ===== Print Styles for PDF Export ===== */
+@media print {
+  /* Hide UI chrome - only show content */
+  body {
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  .app-header,
+  .app-controls,
+  .sidebar-toggle,
+  .theme-toggle,
+  .export-button,
+  .file-button,
+  .search-container,
+  .drop-zone,
+  .file-meta,
+  .file-info,
+  .file-error,
+  .sidebar,
+  .tag-input {
+    display: none !important;
+  }
+
+  /* Full-width content for print */
+  .app {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .app-body {
+    flex-direction: column;
+  }
+
+  .app-main {
+    margin: 0;
+    gap: 0;
+    width: 100%;
+  }
+
+  /* Optimize preview for printing */
+  .preview {
+    max-width: 100%;
+    margin: 0;
+    padding: 40px 60px;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: white;
+  }
+
+  /* Improve page breaks */
+  .preview h1,
+  .preview h2,
+  .preview h3 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  .preview pre,
+  .preview blockquote,
+  .preview table {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .preview img {
+    max-width: 100%;
+    page-break-inside: avoid;
+  }
+
+  /* Ensure links are visible in print */
+  .preview a {
+    color: #0066cc;
+    text-decoration: underline;
+  }
+
+  /* Adjust code blocks for print */
+  .preview pre {
+    background-color: #f8f8f8;
+    border: 1px solid #ddd;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  /* Page margins */
+  @page {
+    margin: 0.75in;
+    size: letter;
   }
 }
 
