@@ -823,13 +823,17 @@ function escapeHtml(text) {
 const setupFileInput = () => {
   const input = document.getElementById("file-input");
   if (!input) {
-    console.error("File input element not found");
+    console.error("❌ File input element not found!");
     return;
   }
 
+  console.log("✅ File input found, setting up listener");
+
   input.addEventListener("change", (event) => {
+    console.log("📁 File input change event triggered");
     const [file] = event.target.files || [];
     if (file) {
+      console.log("📄 File selected:", file.name);
       handleFile(file);
     }
     // Reset input so same file can be selected again
@@ -838,8 +842,11 @@ const setupFileInput = () => {
 };
 
 // Call setup immediately and on DOM ready
-setupFileInput();
-document.addEventListener("DOMContentLoaded", setupFileInput);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", setupFileInput);
+} else {
+  setupFileInput();
+}
 
 // Setup drag-drop and click handlers
 const setupDropZone = () => {
