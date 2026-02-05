@@ -33,7 +33,15 @@
         </div>
 
         <div class="app-controls">
-          <!-- Theme toggle placeholder (Phase 6) -->
+          <button
+            type="button"
+            class="sidebar-toggle"
+            aria-label="Toggle sidebar"
+            title="Toggle file library"
+          >
+            ☰
+          </button>
+
           <button
             type="button"
             class="theme-toggle"
@@ -98,40 +106,64 @@
         </div>
       </header>
 
-      <main class="app-main">
-        <section
-          id="drop-zone"
-          class="drop-zone"
-          aria-label="Markdown file drop zone"
-        >
-          <div class="drop-zone-inner">
-            <p class="drop-zone-title">Drag a markdown file here</p>
-            <p class="drop-zone-or">or</p>
-            <p class="drop-zone-action">click “Open File” to browse</p>
-            <p class="drop-zone-hint">Supported: .md, .markdown, .txt — max 5&nbsp;MB</p>
-          </div>
-        </section>
+      <div class="app-body">
+        <aside class="sidebar">
+          <section class="file-library">
+            <h3>Files <span class="count">(0)</span></h3>
+            <div class="file-list"></div>
+          </section>
 
-        <section class="file-meta" aria-live="polite">
-          <p id="file-info" class="file-info file-info--empty">
-            No file loaded.
-          </p>
-          <p id="file-error" class="file-error" role="status" aria-live="polite"></p>
-        </section>
+          <section class="tag-cloud">
+            <h3>Tags</h3>
+            <div class="tag-list"></div>
+            <button class="clear-filters" type="button">Clear filters</button>
+          </section>
+        </aside>
 
-        <section
-          id="preview"
-          class="preview"
-          aria-label="Rendered markdown preview"
-        >
-          <article class="preview-placeholder">
-            <h2>Welcome</h2>
-            <p>
-              Load a markdown file to see it rendered here with
-              <strong>beautiful typography</strong> and
-              <code>syntax-highlighted</code> code blocks.
+        <main class="app-main">
+          <section
+            id="drop-zone"
+            class="drop-zone"
+            aria-label="Markdown file drop zone"
+          >
+            <div class="drop-zone-inner">
+              <p class="drop-zone-title">Drag a markdown file here</p>
+              <p class="drop-zone-or">or</p>
+              <p class="drop-zone-action">click "Open File" to browse</p>
+              <p class="drop-zone-hint">Supported: .md, .markdown, .txt — max 5&nbsp;MB</p>
+            </div>
+          </section>
+
+          <section class="file-meta" aria-live="polite">
+            <p id="file-info" class="file-info file-info--empty">
+              No file loaded.
             </p>
-            <pre><code class="language-markdown"># Example markdown
+            <p id="file-error" class="file-error" role="status" aria-live="polite"></p>
+          </section>
+
+          <section class="tag-input">
+            <div class="tags-display"></div>
+            <input
+              type="text"
+              placeholder="Add tag..."
+              aria-label="Add tag to current file"
+              disabled
+            />
+          </section>
+
+          <section
+            id="preview"
+            class="preview"
+            aria-label="Rendered markdown preview"
+          >
+            <article class="preview-placeholder">
+              <h2>Welcome</h2>
+              <p>
+                Load a markdown file to see it rendered here with
+                <strong>beautiful typography</strong> and
+                <code>syntax-highlighted</code> code blocks.
+              </p>
+              <pre><code class="language-markdown"># Example markdown
 
 This is a paragraph with **bold** and *italic* text.
 
@@ -142,9 +174,10 @@ This is a paragraph with **bold** and *italic* text.
 const hello = "world";
 console.log(hello);
 ```</code></pre>
-          </article>
-        </section>
-      </main>
+            </article>
+          </section>
+        </main>
+      </div>
     </div>
 
     <!-- marked.js (Markdown parser) -->
@@ -152,6 +185,9 @@ console.log(hello);
 
     <!-- highlight.js (syntax highlighting) -->
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.8.0/build/highlight.min.js"></script>
+
+    <!-- Storage layer (persistence) -->
+    <script src="storage.js"></script>
 
     <!-- App logic -->
     <script src="app.js"></script>

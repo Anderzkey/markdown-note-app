@@ -1,6 +1,15 @@
 // Core application state
 const appState = {
-  currentFile: null,
+  // Multi-file library support
+  files: [],                           // Array of all loaded files
+  currentFileId: null,                 // ID of currently viewed file
+  currentFile: null,                   // Current file object (for backward compatibility)
+  tags: new Map(),                     // Map<tagName, Set<fileIds>>
+  activeFilters: new Set(),            // Currently active tag filters
+  sidebarExpanded: true,               // Sidebar visibility on mobile
+  sortBy: "recent",                    // Sort order: "recent", "name", "size"
+
+  // Search functionality
   search: {
     query: "",
     matches: [],
@@ -133,22 +142,36 @@ function handleFile(file) {
 
   reader.onload = (event) => {
     const text = event.target.result || "";
-    appState.currentFile = {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      lastModified: file.lastModified,
-      content: text,
-    };
+    const fileId = generateFileId(file);
 
-    updateFileInfo(appState.currentFile);
-    renderMarkdown(text);
+    // Check if file already exists (update it)
+    let existingFile = appState.files.find(f => f.id === fileId);
 
-    // Reset search when new file loads
-    clearSearch();
+    if (existingFile) {
+      // Update existing file
+      existingFile.content = text;
+      existingFile.lastViewed = Date.now();
+    } else {
+      // Add new file
+      const newFile = {
+        id: fileId,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+        content: text,
+        tags: new Set(),
+        addedAt: Date.now(),
+        lastViewed: Date.now(),
+      };
+      appState.files.push(newFile);
+    }
 
-    // Enable search controls
-    if (searchInput) searchInput.disabled = false;
+    // Select this file as current
+    selectFile(fileId);
+
+    // Save to storage
+    saveToStorage();
   };
 
   reader.onerror = () => {
@@ -156,6 +179,196 @@ function handleFile(file) {
   };
 
   reader.readAsText(file);
+}
+
+// ============================================================================
+// MULTI-FILE & TAG MANAGEMENT
+// ============================================================================
+
+/**
+ * Selects a file to view
+ * @param {string} fileId - The file ID to select
+ */
+function selectFile(fileId) {
+  const file = appState.files.find(f => f.id === fileId);
+  if (!file) return;
+
+  file.lastViewed = Date.now();
+  appState.currentFileId = fileId;
+  appState.currentFile = file;
+
+  updateFileInfo(file);
+  renderMarkdown(file.content);
+  renderTagInput();
+  renderTagCloud();
+  renderFileList();
+  clearSearch();
+
+  if (searchInput) searchInput.disabled = false;
+  saveToStorage();
+}
+
+/**
+ * Deletes a file from the library
+ * @param {string} fileId - The file ID to delete
+ */
+function deleteFile(fileId) {
+  const fileIndex = appState.files.findIndex(f => f.id === fileId);
+  if (fileIndex === -1) return;
+
+  const file = appState.files[fileIndex];
+
+  // Clean up tags index
+  file.tags.forEach(tag => {
+    const tagFiles = appState.tags.get(tag);
+    if (tagFiles) {
+      tagFiles.delete(fileId);
+      if (tagFiles.size === 0) {
+        appState.tags.delete(tag);
+      }
+    }
+  });
+
+  // Remove file from array
+  appState.files.splice(fileIndex, 1);
+
+  // If was current file, clear preview
+  if (appState.currentFileId === fileId) {
+    appState.currentFileId = null;
+    appState.currentFile = null;
+    updateFileInfo(null);
+    dropZone.classList.remove("drop-zone--hidden");
+    previewEl.innerHTML = '';
+  }
+
+  saveToStorage();
+  renderFileList();
+  renderTagCloud();
+}
+
+/**
+ * Gets files filtered by active tag filters
+ * Uses AND logic: file must have ALL active tags
+ * @returns {Array} Filtered file array
+ */
+function getFilteredFiles() {
+  if (appState.activeFilters.size === 0) {
+    return appState.files;
+  }
+
+  return appState.files.filter(file => {
+    for (const tag of appState.activeFilters) {
+      if (!file.tags.has(tag)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Adds a tag to the current file
+ * @param {string} tagName - The tag to add
+ */
+function addTagToCurrentFile(tagName) {
+  if (!appState.currentFile) return;
+
+  const normalized = tagName.trim().toLowerCase();
+
+  // Validation
+  if (!normalized || normalized.length > 20) return;
+  if (!/^[a-z0-9-_]+$/.test(normalized)) {
+    showError("Tags: letters, numbers, hyphens, underscores only");
+    return;
+  }
+
+  // Add to file
+  appState.currentFile.tags.add(normalized);
+
+  // Update tags index
+  if (!appState.tags.has(normalized)) {
+    appState.tags.set(normalized, new Set());
+  }
+  appState.tags.get(normalized).add(appState.currentFile.id);
+
+  clearError();
+  saveToStorage();
+  renderTagInput();
+  renderFileList();
+  renderTagCloud();
+}
+
+/**
+ * Removes a tag from the current file
+ * @param {string} tagName - The tag to remove
+ */
+function removeTagFromCurrentFile(tagName) {
+  if (!appState.currentFile) return;
+
+  const normalized = tagName.trim().toLowerCase();
+  appState.currentFile.tags.delete(normalized);
+
+  // Update tags index
+  const tagFiles = appState.tags.get(normalized);
+  if (tagFiles) {
+    tagFiles.delete(appState.currentFile.id);
+    if (tagFiles.size === 0) {
+      appState.tags.delete(normalized);
+    }
+  }
+
+  saveToStorage();
+  renderTagInput();
+  renderFileList();
+  renderTagCloud();
+}
+
+/**
+ * Rebuilds the tags index from all files
+ * Called on app initialization
+ */
+function rebuildTagsIndex() {
+  appState.tags.clear();
+  appState.files.forEach(file => {
+    file.tags.forEach(tag => {
+      if (!appState.tags.has(tag)) {
+        appState.tags.set(tag, new Set());
+      }
+      appState.tags.get(tag).add(file.id);
+    });
+  });
+}
+
+/**
+ * Toggles a tag filter on/off
+ * @param {string} tagName - The tag to toggle
+ */
+function toggleTagFilter(tagName) {
+  if (appState.activeFilters.has(tagName)) {
+    appState.activeFilters.delete(tagName);
+  } else {
+    appState.activeFilters.add(tagName);
+  }
+
+  renderFileList();
+  renderTagCloud();
+
+  // If current file is filtered out, clear preview
+  const filteredFiles = getFilteredFiles();
+  if (!filteredFiles.some(f => f.id === appState.currentFileId)) {
+    appState.currentFileId = null;
+    appState.currentFile = null;
+    updateFileInfo(null);
+    dropZone.classList.remove("drop-zone--hidden");
+    previewEl.innerHTML = '';
+  }
+}
+
+/**
+ * Clears all active tag filters
+ */
+function clearAllFilters() {
+  appState.activeFilters.clear();
+  renderFileList();
+  renderTagCloud();
 }
 
 // ============================================================================
@@ -468,6 +681,157 @@ function clearSearch() {
   updateSearchUI();
 }
 
+// ============================================================================
+// UI RENDERING FUNCTIONS
+// ============================================================================
+
+/**
+ * Renders the file list in the sidebar
+ */
+function renderFileList() {
+  const fileListEl = document.querySelector('.file-list');
+  if (!fileListEl) return;
+
+  const filteredFiles = getFilteredFiles();
+
+  if (filteredFiles.length === 0) {
+    fileListEl.innerHTML = '<p class="empty-state">No files</p>';
+    return;
+  }
+
+  // Sort files
+  const sorted = [...filteredFiles].sort((a, b) => {
+    if (appState.sortBy === 'name') {
+      return a.name.localeCompare(b.name);
+    } else if (appState.sortBy === 'size') {
+      return b.size - a.size;
+    } else { // recent
+      return b.lastViewed - a.lastViewed;
+    }
+  });
+
+  fileListEl.innerHTML = sorted.map(file => {
+    const isActive = file.id === appState.currentFileId;
+    const tagsHtml = Array.from(file.tags)
+      .map(tag => `<span class="tag-badge">${escapeHtml(tag)}</span>`)
+      .join('');
+
+    return `
+      <div class="file-item ${isActive ? 'file-item--active' : ''}" data-file-id="${file.id}">
+        <div class="file-item__name">${escapeHtml(file.name)}</div>
+        ${file.tags.size > 0 ? `<div class="file-item__tags">${tagsHtml}</div>` : ''}
+        <button class="file-item__delete" data-file-id="${file.id}" title="Delete file">✕</button>
+      </div>
+    `;
+  }).join('');
+
+  // Wire up file selection
+  fileListEl.querySelectorAll('.file-item').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (!e.target.classList.contains('file-item__delete')) {
+        selectFile(el.dataset.fileId);
+      }
+    });
+  });
+
+  // Wire up delete buttons
+  fileListEl.querySelectorAll('.file-item__delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm(`Delete "${appState.files.find(f => f.id === btn.dataset.fileId).name}"?`)) {
+        deleteFile(btn.dataset.fileId);
+      }
+    });
+  });
+
+  // Update file count
+  const countEl = document.querySelector('.file-library .count');
+  if (countEl) {
+    countEl.textContent = `(${appState.files.length})`;
+  }
+}
+
+/**
+ * Renders the tag cloud in the sidebar
+ */
+function renderTagCloud() {
+  const tagListEl = document.querySelector('.tag-list');
+  if (!tagListEl) return;
+
+  if (appState.tags.size === 0) {
+    tagListEl.innerHTML = '<p class="empty-state">No tags yet</p>';
+    return;
+  }
+
+  // Get tags sorted by usage count
+  const sortedTags = Array.from(appState.tags.entries())
+    .map(([tagName, fileIds]) => ({
+      name: tagName,
+      count: fileIds.size,
+      isActive: appState.activeFilters.has(tagName),
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  tagListEl.innerHTML = sortedTags.map(tag => `
+    <div class="tag-filter-item ${tag.isActive ? 'tag-filter-item--active' : ''}" data-tag="${tag.name}">
+      <span>${escapeHtml(tag.name)}</span>
+      <span class="tag-filter-item__count">${tag.count}</span>
+    </div>
+  `).join('');
+
+  // Wire up tag filtering
+  tagListEl.querySelectorAll('.tag-filter-item').forEach(el => {
+    el.addEventListener('click', () => {
+      toggleTagFilter(el.dataset.tag);
+    });
+  });
+}
+
+/**
+ * Renders the tag input for the current file
+ */
+function renderTagInput() {
+  const tagsDisplayEl = document.querySelector('.tags-display');
+  const tagInputEl = document.querySelector('.tag-input input');
+
+  if (!tagsDisplayEl || !tagInputEl) return;
+
+  if (!appState.currentFile) {
+    tagsDisplayEl.innerHTML = '';
+    tagInputEl.disabled = true;
+    return;
+  }
+
+  // Render tag chips
+  const tagsHtml = Array.from(appState.currentFile.tags)
+    .map(tag => `
+      <div class="tag-chip">
+        <span>${escapeHtml(tag)}</span>
+        <span class="tag-chip__remove" data-tag="${tag}">✕</span>
+      </div>
+    `)
+    .join('');
+
+  tagsDisplayEl.innerHTML = tagsHtml;
+  tagInputEl.disabled = false;
+
+  // Wire up remove buttons
+  tagsDisplayEl.querySelectorAll('.tag-chip__remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      removeTagFromCurrentFile(btn.dataset.tag);
+    });
+  });
+}
+
+/**
+ * Escapes HTML special characters to prevent XSS
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
 // Event wiring
 if (fileInput) {
   fileInput.addEventListener("change", (event) => {
@@ -562,4 +926,78 @@ document.addEventListener("keydown", (event) => {
     }
   }
 });
+
+// Tag input event wiring
+const tagInputEl = document.querySelector('.tag-input input');
+if (tagInputEl) {
+  tagInputEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const tagName = event.target.value.trim();
+      if (tagName) {
+        addTagToCurrentFile(tagName);
+        event.target.value = '';
+      }
+    }
+  });
+}
+
+// Clear filters button
+const clearFiltersBtn = document.querySelector('.clear-filters');
+if (clearFiltersBtn) {
+  clearFiltersBtn.addEventListener('click', clearAllFilters);
+}
+
+// Sidebar toggle (mobile)
+const sidebarToggle = document.querySelector('.sidebar-toggle');
+const sidebar = document.querySelector('.sidebar');
+if (sidebarToggle) {
+  sidebarToggle.addEventListener('click', () => {
+    appState.sidebarExpanded = !appState.sidebarExpanded;
+    sidebar?.classList.toggle('sidebar--collapsed');
+  });
+}
+
+// ============================================================================
+// APP INITIALIZATION
+// ============================================================================
+
+function initApp() {
+  // Load from storage
+  const savedData = loadFromStorage();
+  if (savedData) {
+    appState.files = savedData.files || [];
+    appState.sidebarExpanded = savedData.settings?.sidebarExpanded ?? true;
+    appState.sortBy = savedData.settings?.sortBy ?? 'recent';
+    rebuildTagsIndex();
+  }
+
+  // Render initial state
+  renderFileList();
+  renderTagCloud();
+
+  // If files exist, select the most recent
+  if (appState.files.length > 0) {
+    const sorted = [...appState.files].sort((a, b) =>
+      b.lastViewed - a.lastViewed
+    );
+    selectFile(sorted[0].id);
+  } else {
+    // Show drop zone
+    dropZone.classList.remove('drop-zone--hidden');
+  }
+
+  // Check storage usage
+  const usage = getStorageUsagePercent();
+  if (usage > 80) {
+    showError(`⚠️ Storage nearly full (${usage}%). Consider exporting your library.`);
+  }
+}
+
+// Initialize app when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
