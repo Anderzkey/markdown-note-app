@@ -41,6 +41,20 @@ const searchClearBtn = document.getElementById("search-clear-btn");
 // Search debouncing
 let searchTimeout;
 
+// Render batching to prevent excessive DOM updates
+let pendingRender = false;
+function queueRender() {
+  if (!pendingRender) {
+    pendingRender = true;
+    requestAnimationFrame(() => {
+      renderTagInput();
+      renderFileList();
+      renderTagCloud();
+      pendingRender = false;
+    });
+  }
+}
+
 // Configure marked + highlight.js
 if (window.marked) {
   marked.setOptions({
@@ -204,6 +218,9 @@ function selectFile(fileId) {
   renderFileList();
   clearSearch();
 
+  // Hide drop zone when file is selected
+  dropZone?.classList.add('drop-zone--hidden');
+
   if (searchInput) searchInput.disabled = false;
   saveToStorage();
 }
@@ -242,8 +259,7 @@ function deleteFile(fileId) {
   }
 
   saveToStorage();
-  renderFileList();
-  renderTagCloud();
+  queueRender();
 }
 
 /**
@@ -265,13 +281,22 @@ function getFilteredFiles() {
 }
 
 /**
+ * Normalizes tag name: trim, lowercase
+ * @param {string} tagName - Raw tag name
+ * @returns {string} Normalized tag
+ */
+function normalizeTag(tagName) {
+  return tagName.trim().toLowerCase();
+}
+
+/**
  * Adds a tag to the current file
  * @param {string} tagName - The tag to add
  */
 function addTagToCurrentFile(tagName) {
   if (!appState.currentFile) return;
 
-  const normalized = tagName.trim().toLowerCase();
+  const normalized = normalizeTag(tagName);
 
   // Validation
   if (!normalized || normalized.length > 20) return;
@@ -291,9 +316,7 @@ function addTagToCurrentFile(tagName) {
 
   clearError();
   saveToStorage();
-  renderTagInput();
-  renderFileList();
-  renderTagCloud();
+  queueRender(); // Batch renders instead of calling 3 times
 }
 
 /**
@@ -303,7 +326,7 @@ function addTagToCurrentFile(tagName) {
 function removeTagFromCurrentFile(tagName) {
   if (!appState.currentFile) return;
 
-  const normalized = tagName.trim().toLowerCase();
+  const normalized = normalizeTag(tagName);
   appState.currentFile.tags.delete(normalized);
 
   // Update tags index
@@ -316,9 +339,7 @@ function removeTagFromCurrentFile(tagName) {
   }
 
   saveToStorage();
-  renderTagInput();
-  renderFileList();
-  renderTagCloud();
+  queueRender(); // Batch renders instead of calling 3 times
 }
 
 /**
@@ -348,8 +369,7 @@ function toggleTagFilter(tagName) {
     appState.activeFilters.add(tagName);
   }
 
-  renderFileList();
-  renderTagCloud();
+  queueRender();
 
   // If current file is filtered out, clear preview
   const filteredFiles = getFilteredFiles();
@@ -725,25 +745,6 @@ function renderFileList() {
     `;
   }).join('');
 
-  // Wire up file selection
-  fileListEl.querySelectorAll('.file-item').forEach(el => {
-    el.addEventListener('click', (e) => {
-      if (!e.target.classList.contains('file-item__delete')) {
-        selectFile(el.dataset.fileId);
-      }
-    });
-  });
-
-  // Wire up delete buttons
-  fileListEl.querySelectorAll('.file-item__delete').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (confirm(`Delete "${appState.files.find(f => f.id === btn.dataset.fileId).name}"?`)) {
-        deleteFile(btn.dataset.fileId);
-      }
-    });
-  });
-
   // Update file count
   const countEl = document.querySelector('.file-library .count');
   if (countEl) {
@@ -778,13 +779,6 @@ function renderTagCloud() {
       <span class="tag-filter-item__count">${tag.count}</span>
     </div>
   `).join('');
-
-  // Wire up tag filtering
-  tagListEl.querySelectorAll('.tag-filter-item').forEach(el => {
-    el.addEventListener('click', () => {
-      toggleTagFilter(el.dataset.tag);
-    });
-  });
 }
 
 /**
@@ -814,13 +808,6 @@ function renderTagInput() {
 
   tagsDisplayEl.innerHTML = tagsHtml;
   tagInputEl.disabled = false;
-
-  // Wire up remove buttons
-  tagsDisplayEl.querySelectorAll('.tag-chip__remove').forEach(btn => {
-    btn.addEventListener('click', () => {
-      removeTagFromCurrentFile(btn.dataset.tag);
-    });
-  });
 }
 
 /**
@@ -927,6 +914,52 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
+// File list event delegation (single handler, no re-wiring on renders)
+const fileListEl = document.querySelector('.file-list');
+if (fileListEl) {
+  fileListEl.addEventListener('click', (e) => {
+    // Handle delete button
+    const deleteBtn = e.target.closest('.file-item__delete');
+    if (deleteBtn) {
+      e.stopPropagation();
+      const fileId = deleteBtn.dataset.fileId;
+      const file = appState.files.find(f => f.id === fileId);
+      if (file && confirm(`Delete "${file.name}"?`)) {
+        deleteFile(fileId);
+      }
+      return;
+    }
+
+    // Handle file item selection
+    const fileItem = e.target.closest('.file-item');
+    if (fileItem) {
+      selectFile(fileItem.dataset.fileId);
+    }
+  });
+}
+
+// Tag list event delegation (single handler, no re-wiring on renders)
+const tagListEl = document.querySelector('.tag-list');
+if (tagListEl) {
+  tagListEl.addEventListener('click', (e) => {
+    const tagItem = e.target.closest('.tag-filter-item');
+    if (tagItem) {
+      toggleTagFilter(tagItem.dataset.tag);
+    }
+  });
+}
+
+// Tag chip removal delegation (single handler, no re-wiring on renders)
+const tagsDisplayEl = document.querySelector('.tags-display');
+if (tagsDisplayEl) {
+  tagsDisplayEl.addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('.tag-chip__remove');
+    if (removeBtn) {
+      removeTagFromCurrentFile(removeBtn.dataset.tag);
+    }
+  });
+}
+
 // Tag input event wiring
 const tagInputEl = document.querySelector('.tag-input input');
 if (tagInputEl) {
@@ -982,9 +1015,11 @@ function initApp() {
       b.lastViewed - a.lastViewed
     );
     selectFile(sorted[0].id);
+    // Hide drop zone when files are loaded
+    dropZone?.classList.add('drop-zone--hidden');
   } else {
-    // Show drop zone
-    dropZone.classList.remove('drop-zone--hidden');
+    // Show drop zone when no files
+    dropZone?.classList.remove('drop-zone--hidden');
   }
 
   // Check storage usage

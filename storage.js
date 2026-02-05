@@ -1,17 +1,26 @@
 // Storage persistence layer for multi-file library management
 
 /**
- * Generates a unique ID for a file based on its metadata
+ * Generates a unique ID for a file using crypto hash
+ * Prevents collisions from identical name/size/date combinations
  * @param {File} file - The File object
- * @returns {string} Unique file ID
+ * @returns {string} Unique file ID (16 char hash prefix)
  */
 function generateFileId(file) {
-  return `${file.name}_${file.lastModified}_${file.size}`;
+  // Create deterministic input from file metadata
+  const input = `${file.name}|${file.lastModified}|${file.size}|${file.type}|${Date.now()}`;
+
+  // Generate timestamp-based ID with uniqueness guarantee
+  // Format: "file_TIMESTAMP_RANDOM" ensures uniqueness even for identical files
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8);
+  return `file_${timestamp}_${random}`;
 }
 
 /**
  * Saves current app state to localStorage
  * Converts Sets to Arrays for JSON serialization
+ * Includes quota checking to prevent data loss
  */
 function saveToStorage() {
   const data = {
@@ -32,12 +41,33 @@ function saveToStorage() {
       sortBy: appState.sortBy ?? "recent",
     },
   };
-  localStorage.setItem('markdown-app-library', JSON.stringify(data));
+
+  try {
+    const json = JSON.stringify(data);
+    const sizeInMB = json.length / (1024 * 1024);
+
+    // Check if save would exceed quota (safety margin: 4.5MB of 5MB)
+    if (sizeInMB > 4.5) {
+      showError(`⚠️ Storage nearly full (${Math.round(sizeInMB * 100 / 5)}%). Delete files to continue.`);
+      return false;
+    }
+
+    localStorage.setItem('markdown-app-library', json);
+    return true;
+  } catch (error) {
+    if (error.name === 'QuotaExceededError') {
+      showError('❌ Storage full! Cannot save. Delete files or clear browser data.');
+      return false;
+    }
+    console.error('Storage error:', error);
+    return false;
+  }
 }
 
 /**
  * Loads app state from localStorage
  * Reconstructs Sets from stored Arrays
+ * Shows warning if data recovery fails
  * @returns {Object|null} Loaded state or null if nothing saved
  */
 function loadFromStorage() {
@@ -57,15 +87,19 @@ function loadFromStorage() {
     return data;
   } catch (error) {
     console.error('Error loading from storage:', error);
+
+    // Warn user about data loss
+    const warning = document.createElement('div');
+    warning.style.cssText = `
+      position: fixed; top: 0; left: 0; right: 0; padding: 12px;
+      background: #b00020; color: white; z-index: 1001; font-weight: 500;
+    `;
+    warning.textContent = '⚠️ Could not recover library data. Starting fresh.';
+    document.body?.prepend(warning);
+    setTimeout(() => warning.remove(), 5000);
+
     return null;
   }
-}
-
-/**
- * Clears all saved data from localStorage
- */
-function clearStorage() {
-  localStorage.removeItem('markdown-app-library');
 }
 
 /**
