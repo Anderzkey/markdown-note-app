@@ -153,8 +153,8 @@ function renderMarkdown(content) {
 }
 
 /**
- * Exports the current markdown file as a PDF using browser print dialog
- * Sets document title to derived PDF filename
+ * Exports the current markdown file as a PDF
+ * Downloads directly without print dialog using html2pdf
  */
 function exportToPDF() {
   // Guard: Ensure file is loaded
@@ -163,23 +163,35 @@ function exportToPDF() {
     return;
   }
 
+  // Guard: Ensure html2pdf is available
+  if (!window.html2pdf) {
+    showError("PDF export library not loaded. Please refresh and try again.");
+    return;
+  }
+
   try {
     // Derive PDF filename from markdown filename
     const pdfFilename = appState.currentFile.name.replace(/\.(md|markdown|txt)$/i, '.pdf');
 
-    // Set document title (used as default filename in print dialog)
-    const originalTitle = document.title;
-    document.title = pdfFilename;
+    // Clone the preview element to avoid modifying the original
+    const element = previewEl.cloneNode(true);
 
-    // Trigger print dialog
-    window.print();
+    // Configure html2pdf options
+    const options = {
+      margin: 10,
+      filename: pdfFilename,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { orientation: 'portrait', unit: 'mm', format: 'letter' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
 
-    // Restore original title after print
-    document.title = originalTitle;
+    // Generate and download PDF
+    html2pdf().set(options).from(element).save();
     clearError();
 
   } catch (err) {
-    showError("Failed to open print dialog. Please try again.");
+    showError("Failed to export PDF. Please try again.");
     console.error("PDF export error:", err);
   }
 }
