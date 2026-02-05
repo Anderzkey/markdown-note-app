@@ -819,27 +819,50 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Event wiring
-if (fileInput) {
-  fileInput.addEventListener("change", (event) => {
+// Event wiring - ensure file input is available
+const setupFileInput = () => {
+  const input = document.getElementById("file-input");
+  if (!input) {
+    console.error("File input element not found");
+    return;
+  }
+
+  input.addEventListener("change", (event) => {
     const [file] = event.target.files || [];
     if (file) {
       handleFile(file);
     }
+    // Reset input so same file can be selected again
+    event.target.value = "";
   });
-}
+};
 
-if (dropZone) {
+// Call setup immediately and on DOM ready
+setupFileInput();
+document.addEventListener("DOMContentLoaded", setupFileInput);
+
+// Setup drag-drop and click handlers
+const setupDropZone = () => {
+  const zone = document.getElementById("drop-zone");
+  const input = document.getElementById("file-input");
+
+  if (!zone) {
+    console.error("Drop zone element not found");
+    return;
+  }
+
+  // Drag enter/over
   ["dragenter", "dragover"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
+    zone.addEventListener(eventName, (event) => {
       event.preventDefault();
       event.stopPropagation();
-      dropZone.classList.add("drop-zone--active");
+      zone.classList.add("drop-zone--active");
     });
   });
 
+  // Drag leave/drop
   ["dragleave", "drop"].forEach((eventName) => {
-    dropZone.addEventListener(eventName, (event) => {
+    zone.addEventListener(eventName, (event) => {
       event.preventDefault();
       event.stopPropagation();
 
@@ -852,14 +875,19 @@ if (dropZone) {
         }
       }
 
-      dropZone.classList.remove("drop-zone--active");
+      zone.classList.remove("drop-zone--active");
     });
   });
 
-  dropZone.addEventListener("click", () => {
-    fileInput?.click();
+  // Click to open file picker
+  zone.addEventListener("click", () => {
+    input?.click();
   });
-}
+};
+
+// Call setup immediately and on DOM ready
+setupDropZone();
+document.addEventListener("DOMContentLoaded", setupDropZone);
 
 // Search event wiring
 if (searchInput) {
