@@ -25,10 +25,12 @@ const appState = {
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_TEXTAREA_SIZE_BYTES = 5 * 1024 * 1024; // 5MB max for editor
 const MAX_SEARCH_LENGTH = 100; // Prevent DoS from massive search queries
 const MAX_MATCHES = 1000; // Prevent memory crash from too many matches
 const SEARCH_DEBOUNCE_MS = 250; // Wait 250ms after user stops typing
 const EDIT_SAVE_DEBOUNCE_MS = 500; // Wait 500ms after user stops typing before auto-save
+const EDIT_STATS_DEBOUNCE_MS = 150; // Wait 150ms before updating stats (less frequent)
 const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"];
 const ALLOWED_MIME_TYPES = ["text/plain", "text/markdown", ""];
 
@@ -60,6 +62,10 @@ const charCountEl = document.getElementById("char-count");
 // Debounce timers
 let searchTimeout;
 let editSaveTimeout;
+let editStatsTimeout;
+
+// Mutex to prevent concurrent saves
+let editSaveInProgress = false;
 
 // Render batching to prevent excessive DOM updates
 let pendingRender = false;
@@ -228,6 +234,12 @@ function exportToPDF() {
 function enterEditMode() {
   if (!appState.currentFile) return;
 
+  // Validate content size
+  if (appState.currentFile.content.length > MAX_TEXTAREA_SIZE_BYTES) {
+    showError("File is too large to edit (max 5MB).");
+    return;
+  }
+
   appState.edit.isActive = true;
   appState.edit.originalContent = appState.currentFile.content;
   appState.edit.hasUnsavedChanges = false;
@@ -240,11 +252,11 @@ function enterEditMode() {
     editorTextarea.focus();
   }
 
-  // Update button visibility
-  if (editBtn) editBtn.style.display = "none";
-  if (saveEditBtn) saveEditBtn.style.display = "inline-block";
-  if (cancelEditBtn) cancelEditBtn.style.display = "inline-block";
-  if (previewEditBtn) previewEditBtn.style.display = "inline-block";
+  // Update button visibility using CSS classes
+  if (editBtn) editBtn.classList.add('editor-btn--hidden');
+  if (saveEditBtn) saveEditBtn.classList.remove('editor-btn--hidden');
+  if (cancelEditBtn) cancelEditBtn.classList.remove('editor-btn--hidden');
+  if (previewEditBtn) previewEditBtn.classList.remove('editor-btn--hidden');
   if (exportPdfBtn) exportPdfBtn.disabled = true;
 
   // Clear search when entering edit mode
@@ -280,11 +292,11 @@ function exitEditMode(saveChanges) {
     renderMarkdown(appState.currentFile.content);
   }
 
-  // Update button visibility
-  if (editBtn) editBtn.style.display = "inline-block";
-  if (saveEditBtn) saveEditBtn.style.display = "none";
-  if (cancelEditBtn) cancelEditBtn.style.display = "none";
-  if (previewEditBtn) previewEditBtn.style.display = "none";
+  // Update button visibility using CSS classes
+  if (editBtn) editBtn.classList.remove('editor-btn--hidden');
+  if (saveEditBtn) saveEditBtn.classList.add('editor-btn--hidden');
+  if (cancelEditBtn) cancelEditBtn.classList.add('editor-btn--hidden');
+  if (previewEditBtn) previewEditBtn.classList.add('editor-btn--hidden');
   if (exportPdfBtn) exportPdfBtn.disabled = false;
 
   // Re-enable search
@@ -296,6 +308,7 @@ function exitEditMode(saveChanges) {
 /**
  * Auto-saves changes after a debounce period
  * Debounce prevents excessive saves during rapid typing
+ * Mutex prevents concurrent save operations
  */
 function autoSaveEdit() {
   if (!appState.edit.isActive || !appState.currentFile) return;
@@ -305,10 +318,20 @@ function autoSaveEdit() {
 
   // Schedule new auto-save
   editSaveTimeout = setTimeout(() => {
-    if (appState.edit.isActive && appState.edit.hasUnsavedChanges) {
-      appState.currentFile.content = editorTextarea.value;
-      saveToStorage();
-      appState.edit.hasUnsavedChanges = false;
+    if (appState.edit.isActive && appState.edit.hasUnsavedChanges && !editSaveInProgress) {
+      editSaveInProgress = true;
+      try {
+        appState.currentFile.content = editorTextarea.value;
+        const success = saveToStorage();
+        if (!success) {
+          showError("Failed to save (storage full). Your changes are not saved.");
+          // Keep unsaved flag so user knows changes aren't saved
+          return;
+        }
+        appState.edit.hasUnsavedChanges = false;
+      } finally {
+        editSaveInProgress = false;
+      }
     }
   }, EDIT_SAVE_DEBOUNCE_MS);
 }
@@ -316,19 +339,33 @@ function autoSaveEdit() {
 /**
  * Explicitly saves changes without debounce
  * Called when user clicks Save button
+ * Mutex prevents concurrent saves
  */
 function saveEdit() {
   if (!appState.edit.isActive || !appState.currentFile) return;
 
-  // Clear any pending auto-save
-  clearTimeout(editSaveTimeout);
+  // Prevent concurrent saves
+  if (editSaveInProgress) return;
+  editSaveInProgress = true;
 
-  // Save immediately
-  appState.currentFile.content = editorTextarea.value;
-  saveToStorage();
-  appState.edit.hasUnsavedChanges = false;
+  try {
+    // Clear any pending auto-save
+    clearTimeout(editSaveTimeout);
 
-  clearError();
+    // Save immediately
+    appState.currentFile.content = editorTextarea.value;
+    const success = saveToStorage();
+
+    if (!success) {
+      showError("Failed to save (storage full). Your changes are not saved.");
+      return;
+    }
+
+    appState.edit.hasUnsavedChanges = false;
+    clearError();
+  } finally {
+    editSaveInProgress = false;
+  }
 }
 
 /**
@@ -357,6 +394,7 @@ function togglePreview() {
 
 /**
  * Updates word and character count statistics
+ * Called frequently but execution is debounced to 150ms
  */
 function updateEditorStats() {
   if (!editorTextarea) return;
@@ -374,6 +412,17 @@ function updateEditorStats() {
   if (wordCountEl) {
     wordCountEl.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
   }
+}
+
+/**
+ * Debounced stats update to reduce calculations on every keystroke
+ * Only updates at most every 150ms instead of on every input event
+ */
+function debouncedUpdateEditorStats() {
+  clearTimeout(editStatsTimeout);
+  editStatsTimeout = setTimeout(() => {
+    updateEditorStats();
+  }, EDIT_STATS_DEBOUNCE_MS);
 }
 
 /**
@@ -1218,8 +1267,16 @@ if (previewEditBtn) {
 if (editorTextarea) {
   editorTextarea.addEventListener("input", () => {
     const currentContent = editorTextarea.value;
+
+    // Validate content size to prevent memory issues
+    if (currentContent.length > MAX_TEXTAREA_SIZE_BYTES) {
+      showError("Content is too large (max 5MB). Some content will be lost.");
+      editorTextarea.value = currentContent.substring(0, MAX_TEXTAREA_SIZE_BYTES);
+      return;
+    }
+
     appState.edit.hasUnsavedChanges = currentContent !== appState.edit.originalContent;
-    updateEditorStats();
+    debouncedUpdateEditorStats(); // Use debounced version for performance
     autoSaveEdit();
   });
 
@@ -1233,7 +1290,8 @@ if (editorTextarea) {
       editorTextarea.value = text.substring(0, start) + "\t" + text.substring(end);
       editorTextarea.selectionStart = editorTextarea.selectionEnd = start + 1;
       appState.edit.hasUnsavedChanges = true;
-      updateEditorStats();
+      debouncedUpdateEditorStats();
+      autoSaveEdit(); // Trigger auto-save like normal input events do
     }
   });
 }
@@ -1403,7 +1461,7 @@ function initApp() {
   // Check storage usage
   const usage = getStorageUsagePercent();
   if (usage > 80) {
-    showError(`⚠️ Storage nearly full (${usage}%). Consider exporting your library.`);
+    showError("Storage is nearly full. Consider deleting some files to free up space.");
   }
 }
 

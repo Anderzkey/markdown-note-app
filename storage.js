@@ -48,7 +48,7 @@ function saveToStorage() {
 
     // Check if save would exceed quota (safety margin: 4.5MB of 5MB)
     if (sizeInMB > 4.5) {
-      showError(`⚠️ Storage nearly full (${Math.round(sizeInMB * 100 / 5)}%). Delete files to continue.`);
+      showError("Storage is running low. Please delete some files to continue.");
       return false;
     }
 
@@ -56,7 +56,7 @@ function saveToStorage() {
     return true;
   } catch (error) {
     if (error.name === 'QuotaExceededError') {
-      showError('❌ Storage full! Cannot save. Delete files or clear browser data.');
+      showError("Storage is full. Please delete some files and try again.");
       return false;
     }
     console.error('Storage error:', error);

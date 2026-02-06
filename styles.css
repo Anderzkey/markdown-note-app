@@ -163,6 +163,11 @@ body {
   cursor: not-allowed;
 }
 
+/* Edit mode button visibility states */
+.editor-btn--hidden {
+  display: none !important;
+}
+
 /* Edit Mode Styles */
 .editor {
   margin-top: 6px;
