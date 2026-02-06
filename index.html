@@ -63,6 +63,50 @@
             📄 Export PDF
           </button>
 
+          <button
+            id="edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Edit markdown"
+            title="Edit current document"
+            disabled
+          >
+            ✏️ Edit
+          </button>
+
+          <button
+            id="save-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Save changes"
+            title="Save current changes"
+            style="display: none;"
+          >
+            💾 Save
+          </button>
+
+          <button
+            id="cancel-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Cancel editing"
+            title="Discard changes and exit edit mode"
+            style="display: none;"
+          >
+            ✕ Cancel
+          </button>
+
+          <button
+            id="preview-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Toggle preview"
+            title="Switch between editor and preview"
+            style="display: none;"
+          >
+            👁️ Preview
+          </button>
+
           <label class="file-button">
             <input
               id="file-input"
@@ -160,6 +204,25 @@
               aria-label="Add tag to current file"
               disabled
             />
+          </section>
+
+          <section
+            id="editor"
+            class="editor"
+            style="display: none;"
+            aria-label="Markdown editor"
+          >
+            <textarea
+              id="editor-textarea"
+              class="editor-textarea"
+              placeholder="Edit your markdown here..."
+              aria-label="Markdown editor textarea"
+            ></textarea>
+            <div class="editor-stats">
+              <span id="word-count">0 words</span>
+              <span class="editor-stats-separator">·</span>
+              <span id="char-count">0 characters</span>
+            </div>
           </section>
 
           <section

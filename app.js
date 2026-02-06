@@ -15,12 +15,20 @@ const appState = {
     matches: [],
     currentMatchIndex: -1,
   },
+
+  // Edit mode
+  edit: {
+    isActive: false,
+    originalContent: "",
+    hasUnsavedChanges: false,
+  },
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 const MAX_SEARCH_LENGTH = 100; // Prevent DoS from massive search queries
 const MAX_MATCHES = 1000; // Prevent memory crash from too many matches
 const SEARCH_DEBOUNCE_MS = 250; // Wait 250ms after user stops typing
+const EDIT_SAVE_DEBOUNCE_MS = 500; // Wait 500ms after user stops typing before auto-save
 const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"];
 const ALLOWED_MIME_TYPES = ["text/plain", "text/markdown", ""];
 
@@ -39,8 +47,19 @@ const searchPrevBtn = document.getElementById("search-prev-btn");
 const searchNextBtn = document.getElementById("search-next-btn");
 const searchClearBtn = document.getElementById("search-clear-btn");
 
-// Search debouncing
+// Edit mode DOM references
+const editBtn = document.getElementById("edit-btn");
+const saveEditBtn = document.getElementById("save-edit-btn");
+const cancelEditBtn = document.getElementById("cancel-edit-btn");
+const previewEditBtn = document.getElementById("preview-edit-btn");
+const editorEl = document.getElementById("editor");
+const editorTextarea = document.getElementById("editor-textarea");
+const wordCountEl = document.getElementById("word-count");
+const charCountEl = document.getElementById("char-count");
+
+// Debounce timers
 let searchTimeout;
+let editSaveTimeout;
 
 // Render batching to prevent excessive DOM updates
 let pendingRender = false;
@@ -98,16 +117,18 @@ function updateFileInfo(file) {
   if (!file) {
     fileInfoEl.textContent = "No file loaded.";
     fileInfoEl.classList.add("file-info--empty");
-    // Disable export button
+    // Disable export and edit buttons
     if (exportPdfBtn) exportPdfBtn.disabled = true;
+    if (editBtn) editBtn.disabled = true;
     return;
   }
 
   fileInfoEl.classList.remove("file-info--empty");
   // Use textContent to safely display filename (prevents XSS)
   fileInfoEl.textContent = `${file.name} · ${formatFileSize(file.size)}`;
-  // Enable export button
+  // Enable export and edit buttons
   if (exportPdfBtn) exportPdfBtn.disabled = false;
+  if (editBtn) editBtn.disabled = false;
 }
 
 function validateFile(file) {
@@ -196,6 +217,177 @@ function exportToPDF() {
   }
 }
 
+// ============================================================================
+// EDIT MODE FUNCTIONS
+// ============================================================================
+
+/**
+ * Enters edit mode for the current file
+ * Backs up content and shows the editor textarea
+ */
+function enterEditMode() {
+  if (!appState.currentFile) return;
+
+  appState.edit.isActive = true;
+  appState.edit.originalContent = appState.currentFile.content;
+  appState.edit.hasUnsavedChanges = false;
+
+  // Hide preview, show editor
+  if (previewEl) previewEl.style.display = "none";
+  if (editorEl) editorEl.style.display = "flex";
+  if (editorTextarea) {
+    editorTextarea.value = appState.currentFile.content;
+    editorTextarea.focus();
+  }
+
+  // Update button visibility
+  if (editBtn) editBtn.style.display = "none";
+  if (saveEditBtn) saveEditBtn.style.display = "inline-block";
+  if (cancelEditBtn) cancelEditBtn.style.display = "inline-block";
+  if (previewEditBtn) previewEditBtn.style.display = "inline-block";
+  if (exportPdfBtn) exportPdfBtn.disabled = true;
+
+  // Clear search when entering edit mode
+  clearSearch();
+  if (searchInput) searchInput.disabled = true;
+
+  updateEditorStats();
+  clearError();
+}
+
+/**
+ * Exits edit mode
+ * @param {boolean} saveChanges - Whether to save changes before exiting
+ */
+function exitEditMode(saveChanges) {
+  if (!appState.edit.isActive) return;
+
+  if (saveChanges && appState.edit.hasUnsavedChanges) {
+    appState.currentFile.content = editorTextarea.value;
+    saveToStorage();
+  }
+
+  appState.edit.isActive = false;
+  appState.edit.hasUnsavedChanges = false;
+  appState.edit.originalContent = "";
+
+  // Show preview, hide editor
+  if (editorEl) editorEl.style.display = "none";
+  if (previewEl) previewEl.style.display = "block";
+
+  // Render updated markdown if changes were saved
+  if (saveChanges && appState.currentFile) {
+    renderMarkdown(appState.currentFile.content);
+  }
+
+  // Update button visibility
+  if (editBtn) editBtn.style.display = "inline-block";
+  if (saveEditBtn) saveEditBtn.style.display = "none";
+  if (cancelEditBtn) cancelEditBtn.style.display = "none";
+  if (previewEditBtn) previewEditBtn.style.display = "none";
+  if (exportPdfBtn) exportPdfBtn.disabled = false;
+
+  // Re-enable search
+  if (searchInput && appState.currentFile) searchInput.disabled = false;
+
+  clearError();
+}
+
+/**
+ * Auto-saves changes after a debounce period
+ * Debounce prevents excessive saves during rapid typing
+ */
+function autoSaveEdit() {
+  if (!appState.edit.isActive || !appState.currentFile) return;
+
+  // Clear any pending auto-save
+  clearTimeout(editSaveTimeout);
+
+  // Schedule new auto-save
+  editSaveTimeout = setTimeout(() => {
+    if (appState.edit.isActive && appState.edit.hasUnsavedChanges) {
+      appState.currentFile.content = editorTextarea.value;
+      saveToStorage();
+      appState.edit.hasUnsavedChanges = false;
+    }
+  }, EDIT_SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * Explicitly saves changes without debounce
+ * Called when user clicks Save button
+ */
+function saveEdit() {
+  if (!appState.edit.isActive || !appState.currentFile) return;
+
+  // Clear any pending auto-save
+  clearTimeout(editSaveTimeout);
+
+  // Save immediately
+  appState.currentFile.content = editorTextarea.value;
+  saveToStorage();
+  appState.edit.hasUnsavedChanges = false;
+
+  clearError();
+}
+
+/**
+ * Toggles between editor and preview modes
+ */
+function togglePreview() {
+  if (!appState.edit.isActive) return;
+
+  const isEditorVisible = editorEl.style.display !== "none";
+
+  if (isEditorVisible) {
+    // Switch to preview
+    if (editorEl) editorEl.style.display = "none";
+    if (previewEl) previewEl.style.display = "block";
+
+    // Render current markdown from textarea (not saved)
+    const currentContent = editorTextarea.value;
+    renderMarkdown(currentContent);
+  } else {
+    // Switch to editor
+    if (editorEl) editorEl.style.display = "flex";
+    if (previewEl) previewEl.style.display = "none";
+    if (editorTextarea) editorTextarea.focus();
+  }
+}
+
+/**
+ * Updates word and character count statistics
+ */
+function updateEditorStats() {
+  if (!editorTextarea) return;
+
+  const content = editorTextarea.value;
+
+  // Count characters
+  const charCount = content.length;
+  if (charCountEl) {
+    charCountEl.textContent = `${charCount} character${charCount !== 1 ? 's' : ''}`;
+  }
+
+  // Count words (split by whitespace)
+  const wordCount = content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+  if (wordCountEl) {
+    wordCountEl.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+  }
+}
+
+/**
+ * Confirms with user if there are unsaved changes
+ * Returns true if user confirms discard, false if user cancels
+ */
+function confirmDiscardChanges() {
+  if (!appState.edit.hasUnsavedChanges) return true;
+
+  return confirm(
+    "You have unsaved changes. Do you want to discard them?"
+  );
+}
+
 function handleFile(file) {
   if (!validateFile(file)) {
     return;
@@ -253,6 +445,15 @@ function handleFile(file) {
  * @param {string} fileId - The file ID to select
  */
 function selectFile(fileId) {
+  // Check for unsaved changes in edit mode
+  if (appState.edit.isActive && appState.edit.hasUnsavedChanges) {
+    if (!confirmDiscardChanges()) {
+      return; // User cancelled, don't switch files
+    }
+    // User confirmed discard, exit edit mode without saving
+    exitEditMode(false);
+  }
+
   const file = appState.files.find(f => f.id === fileId);
   if (!file) return;
 
@@ -990,16 +1191,104 @@ if (exportPdfBtn) {
   exportPdfBtn.addEventListener("click", exportToPDF);
 }
 
-// Global keyboard shortcut for search: Ctrl+F or Cmd+F
+// Edit mode button wiring
+if (editBtn) {
+  editBtn.addEventListener("click", enterEditMode);
+}
+
+if (saveEditBtn) {
+  saveEditBtn.addEventListener("click", () => {
+    saveEdit();
+  });
+}
+
+if (cancelEditBtn) {
+  cancelEditBtn.addEventListener("click", () => {
+    if (confirmDiscardChanges()) {
+      exitEditMode(false);
+    }
+  });
+}
+
+if (previewEditBtn) {
+  previewEditBtn.addEventListener("click", togglePreview);
+}
+
+// Editor textarea event wiring
+if (editorTextarea) {
+  editorTextarea.addEventListener("input", () => {
+    const currentContent = editorTextarea.value;
+    appState.edit.hasUnsavedChanges = currentContent !== appState.edit.originalContent;
+    updateEditorStats();
+    autoSaveEdit();
+  });
+
+  // Handle Tab key to insert tab character instead of leaving field
+  editorTextarea.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const start = editorTextarea.selectionStart;
+      const end = editorTextarea.selectionEnd;
+      const text = editorTextarea.value;
+      editorTextarea.value = text.substring(0, start) + "\t" + text.substring(end);
+      editorTextarea.selectionStart = editorTextarea.selectionEnd = start + 1;
+      appState.edit.hasUnsavedChanges = true;
+      updateEditorStats();
+    }
+  });
+}
+
+// Global keyboard shortcuts for edit mode
 document.addEventListener("keydown", (event) => {
   // Security: Only respond to genuine user keyboard events, not synthetic ones
   if (!event.isTrusted) return;
 
+  // Ctrl+E or Cmd+E: Toggle edit mode
+  if ((event.ctrlKey || event.metaKey) && event.key === "e") {
+    event.preventDefault();
+    if (!appState.currentFile) return;
+
+    if (appState.edit.isActive) {
+      if (confirmDiscardChanges()) {
+        exitEditMode(false);
+      }
+    } else {
+      enterEditMode();
+    }
+    return;
+  }
+
+  // Ctrl+S or Cmd+S: Save while editing
+  if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+    event.preventDefault();
+    if (appState.edit.isActive) {
+      saveEdit();
+    }
+    return;
+  }
+
+  // Escape: Exit edit mode
+  if (event.key === "Escape") {
+    if (appState.edit.isActive) {
+      event.preventDefault();
+      if (confirmDiscardChanges()) {
+        exitEditMode(false);
+      }
+    } else if (searchInput === document.activeElement) {
+      event.preventDefault();
+      clearSearch();
+      searchInput.blur();
+    }
+    return;
+  }
+
+  // Ctrl+F or Cmd+F: Focus search (original search shortcut)
   if ((event.ctrlKey || event.metaKey) && event.key === "f") {
     event.preventDefault();
-    if (appState.currentFile && searchInput) {
+    if (appState.currentFile && searchInput && !appState.edit.isActive) {
       searchInput.focus();
     }
+    return;
   }
 });
 
