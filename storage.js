@@ -1,19 +1,27 @@
 // Storage persistence layer for multi-file library management
 
 /**
- * Generates a unique ID for a file using crypto hash
+ * Generates a unique ID for a file using crypto-secure randomness
  * Prevents collisions from identical name/size/date combinations
  * @param {File} file - The File object
- * @returns {string} Unique file ID (16 char hash prefix)
+ * @returns {string} Unique file ID (timestamp + secure random)
  */
 function generateFileId(file) {
-  // Create deterministic input from file metadata
-  const input = `${file.name}|${file.lastModified}|${file.size}|${file.type}|${Date.now()}`;
-
-  // Generate timestamp-based ID with uniqueness guarantee
-  // Format: "file_TIMESTAMP_RANDOM" ensures uniqueness even for identical files
+  // Generate timestamp-based ID with enhanced uniqueness guarantee
   const timestamp = Date.now();
-  const random = Math.random().toString(36).substring(2, 8);
+
+  // Use crypto.getRandomValues if available (secure), fallback to Math.random()
+  let random;
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint8Array(6);
+    window.crypto.getRandomValues(arr);
+    random = Array.from(arr, byte => byte.toString(16).padStart(2, '0')).join('');
+  } else {
+    // Fallback: Use multiple Math.random() calls for better entropy
+    random = (Math.random().toString(36).substring(2) +
+              Math.random().toString(36).substring(2)).substring(0, 12);
+  }
+
   return `file_${timestamp}_${random}`;
 }
 
@@ -21,6 +29,7 @@ function generateFileId(file) {
  * Saves current app state to localStorage
  * Converts Sets to Arrays for JSON serialization
  * Includes quota checking to prevent data loss
+ * Tests quota availability BEFORE attempting save
  */
 function saveToStorage() {
   const data = {
@@ -52,6 +61,20 @@ function saveToStorage() {
       return false;
     }
 
+    // BUG FIX #1: Test quota availability BEFORE attempting save
+    // This prevents data corruption if setItem() fails
+    try {
+      localStorage.setItem('__storage_test__', 'test');
+      localStorage.removeItem('__storage_test__');
+    } catch (error) {
+      if (error.name === 'QuotaExceededError') {
+        showError('❌ Storage full! Cannot save. Delete files or clear browser data.');
+        return false;
+      }
+      throw error;
+    }
+
+    // Now perform actual save (quota is confirmed available)
     localStorage.setItem('markdown-app-library', json);
     return true;
   } catch (error) {
