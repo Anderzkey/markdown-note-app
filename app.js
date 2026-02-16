@@ -308,7 +308,12 @@ function deleteFile(fileId) {
   }
 
   saveToStorage();
-  queueRender();
+
+  // BUG FIX #3: Call renderFileList() synchronously to avoid race condition
+  // with tag filters. Using queueRender() can cause deleted files to briefly
+  // appear in filtered views before the batched render executes.
+  renderFileList();
+  renderTagCloud();
 }
 
 /**
@@ -536,10 +541,12 @@ function performSearch(query) {
   // This converts user input into a literal string pattern
   // Example: "a.b" → "a\.b" (matches literal dot, not any character)
   // Matches: . * + ? ^ $ { } ( ) | [ ] \
+  // Note: Properly handles newlines in text because TreeWalker gives us literal text content
   const escapedQuery = appState.search.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(escapedQuery, "gi");
 
   let node;
+  let nodeIndex = 0;
   while ((node = walker.nextNode())) {
     const text = node.textContent;
     let match;
@@ -553,12 +560,16 @@ function performSearch(query) {
         return;
       }
 
+      // BUG FIX #2: Store only position info (nodeIndex), not node reference
+      // This prevents memory leaks from orphaned DOM nodes
       appState.search.matches.push({
-        node: node,
+        nodeIndex: nodeIndex,
         index: match.index,
         text: match[0],
       });
     }
+
+    nodeIndex++;
   }
 
   if (appState.search.matches.length > 0) {
@@ -598,6 +609,9 @@ function removeAllHighlights() {
  * Replaces text nodes with <mark> elements containing the match text
  * First match is marked as active with special styling
  *
+ * BUG FIX #2: Don't store node references to prevent memory leaks
+ * Store only position info (node index will be recalculated when needed)
+ *
  * Time complexity: O(m) where m = match count (capped at 1000)
  * DOM operations are batched - one replaceChild per match
  *
@@ -610,33 +624,50 @@ function highlightMatches() {
 
   // Create new highlights
   appState.search.matches.forEach((match, idx) => {
-    const node = match.node;
-    const text = node.textContent;
+    // Find the text node at this point in the tree
+    // Note: After each replaceChild, the tree structure changes,
+    // so we need to search for nodes again each time
+    const walker = document.createTreeWalker(
+      previewEl,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
 
-    const beforeText = text.slice(0, match.index);
-    const matchText = text.slice(match.index, match.index + match.text.length);
-    const afterText = text.slice(match.index + match.text.length);
+    let node;
+    let nodeIndex = 0;
+    while ((node = walker.nextNode())) {
+      if (nodeIndex === match.nodeIndex) {
+        // Found the correct text node
+        const text = node.textContent;
 
-    const container = document.createElement("span");
+        const beforeText = text.slice(0, match.index);
+        const matchText = text.slice(match.index, match.index + match.text.length);
+        const afterText = text.slice(match.index + match.text.length);
 
-    if (beforeText) {
-      container.appendChild(document.createTextNode(beforeText));
+        const container = document.createElement("span");
+
+        if (beforeText) {
+          container.appendChild(document.createTextNode(beforeText));
+        }
+
+        const mark = document.createElement("mark");
+        mark.className =
+          idx === appState.search.currentMatchIndex
+            ? "search-highlight search-highlight--active"
+            : "search-highlight";
+        mark.textContent = matchText;
+        container.appendChild(mark);
+
+        if (afterText) {
+          container.appendChild(document.createTextNode(afterText));
+        }
+
+        node.parentNode.replaceChild(container, node);
+        break;
+      }
+      nodeIndex++;
     }
-
-    const mark = document.createElement("mark");
-    mark.className =
-      idx === appState.search.currentMatchIndex
-        ? "search-highlight search-highlight--active"
-        : "search-highlight";
-    mark.textContent = matchText;
-    container.appendChild(mark);
-
-    if (afterText) {
-      container.appendChild(document.createTextNode(afterText));
-    }
-
-    node.parentNode.replaceChild(container, node);
-    appState.search.matches[idx].node = mark;
   });
 }
 
@@ -647,17 +678,21 @@ function highlightMatches() {
  * @private
  */
 function updateActiveHighlight(prevIndex) {
+  // BUG FIX #2: Query marks from DOM instead of using stored node references
+  // This prevents stale references to replaced DOM nodes
+
   // Remove active styling from previous match
-  if (prevIndex >= 0 && prevIndex < appState.search.matches.length) {
-    const prevMark = appState.search.matches[prevIndex].node;
-    if (prevMark && prevMark.classList) {
-      prevMark.classList.remove("search-highlight--active");
+  if (prevIndex >= 0) {
+    const prevMarks = previewEl.querySelectorAll(".search-highlight");
+    if (prevMarks[prevIndex]) {
+      prevMarks[prevIndex].classList.remove("search-highlight--active");
     }
   }
 
   // Add active styling to current match and scroll into view
-  const currentMark = appState.search.matches[appState.search.currentMatchIndex].node;
-  if (currentMark && currentMark.classList) {
+  const allMarks = previewEl.querySelectorAll(".search-highlight");
+  const currentMark = allMarks[appState.search.currentMatchIndex];
+  if (currentMark) {
     currentMark.classList.add("search-highlight--active");
     currentMark.scrollIntoView({ behavior: "smooth", block: "center" });
   }
