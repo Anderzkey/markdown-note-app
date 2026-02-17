@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readConfig: () => ipcRenderer.invoke('electronAPI:readConfig'),
   writeConfig: (config) => ipcRenderer.invoke('electronAPI:writeConfig', config),
 
+  // Clipboard
+  getClipboard: () => ipcRenderer.invoke('electronAPI:getClipboard'),
+  setClipboard: (text) => ipcRenderer.invoke('electronAPI:setClipboard', text),
+
   // Listen for menu events
   onOpenFolder: (callback) => ipcRenderer.on('menu:openFolder', callback),
   onSave: (callback) => ipcRenderer.on('menu:save', callback),

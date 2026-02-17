@@ -27,7 +27,7 @@ function createWindow() {
   const indexPath = path.join(__dirname, '..', 'index.html');
   mainWindow.loadFile(indexPath);
 
-  // Open DevTools in development
+  // Open DevTools in development (uncomment for debugging)
   // mainWindow.webContents.openDevTools();
 
   mainWindow.on('closed', () => {
@@ -149,6 +149,28 @@ ipcMain.handle('electronAPI:scanFolder', async (event, folderPath) => {
   }
 });
 
+// ========== Clipboard Management ==========
+
+ipcMain.handle('electronAPI:getClipboard', async (event) => {
+  try {
+    const { clipboard } = require('electron');
+    const text = clipboard.readText();
+    return { success: true, text };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('electronAPI:setClipboard', async (event, text) => {
+  try {
+    const { clipboard } = require('electron');
+    clipboard.writeText(text);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 // ========== App Configuration Management ==========
 
 // Read app configuration
@@ -181,6 +203,14 @@ const { Menu } = require('electron');
 app.whenReady().then(() => {
   const template = [
     {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
       label: 'File',
       submenu: [
         {
@@ -197,14 +227,26 @@ app.whenReady().then(() => {
             mainWindow.webContents.send('menu:save');
           },
         },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
         { type: 'separator' },
-        {
-          label: 'Exit',
-          accelerator: 'Cmd+Q',
-          click: () => {
-            app.quit();
-          },
-        },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
       ],
     },
   ];

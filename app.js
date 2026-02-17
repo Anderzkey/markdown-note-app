@@ -451,6 +451,9 @@ function enterEditMode() {
     previewEl.addEventListener('input', function onEdit() {
       appState.edit.hasUnsavedChanges = true;
     });
+
+    // Just let contentEditable handle copy/paste natively
+    // No custom handlers needed
   }
 
   // Update button visibility using CSS classes
