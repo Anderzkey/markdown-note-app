@@ -163,6 +163,64 @@ body {
   cursor: not-allowed;
 }
 
+/* Edit mode button visibility states */
+.editor-btn--hidden {
+  display: none !important;
+}
+
+/* Edit Mode Styles */
+.editor {
+  margin-top: 6px;
+  border-radius: 12px;
+  background-color: #ffffff;
+  padding: 28px 56px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  max-width: 860px;
+  margin-left: auto;
+  margin-right: auto;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.editor-textarea {
+  flex: 1;
+  min-height: 60vh;
+  width: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--color-text);
+  background-color: transparent;
+  resize: none;
+  outline: none;
+}
+
+.editor-textarea:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+  background-color: transparent;
+}
+
+.editor-stats {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-elevated);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.editor-stats-separator {
+  opacity: 0.5;
+}
+
 .app-main {
   margin-top: 8px;
   display: flex;
@@ -830,6 +888,21 @@ body {
     padding: 18px 12px;
   }
 
+  .editor {
+    padding: 12px;
+  }
+
+  .editor-textarea {
+    min-height: 300px;
+    font-size: 0.85rem;
+  }
+
+  .editor-stats {
+    font-size: 0.8rem;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+
   .tag-input {
     flex-direction: column;
   }
@@ -941,5 +1014,66 @@ body {
     margin: 0.75in;
     size: letter;
   }
+}
+
+/* Inline editor - lives inside .preview, same look as rendered content */
+.inline-editor {
+  display: none;
+  width: 100%;
+  min-height: 60vh;
+  padding: 0;
+  margin: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--color-text);
+  resize: none;
+  overflow-y: auto;
+}
+
+.inline-editor:focus {
+  outline: none;
+  border: none;
+  box-shadow: none;
+}
+
+/* ========== Electron MVP Styles ========== */
+
+/* File library header with browse button */
+.file-library-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.file-library-header h3 {
+  margin: 0;
+  flex: 1;
+}
+
+/* Browse folder button for Electron */
+.browse-folder-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-subtle);
+  background-color: var(--color-bg-elevated);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.browse-folder-btn:hover {
+  background-color: var(--color-accent-soft);
+  border-color: var(--color-accent);
+}
+
+.browse-folder-btn:active {
+  transform: scale(0.98);
 }
 

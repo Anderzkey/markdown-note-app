@@ -15,12 +15,31 @@ const appState = {
     matches: [],
     currentMatchIndex: -1,
   },
+
+  // Edit mode
+  edit: {
+    isActive: false,
+    originalContent: "",
+    hasUnsavedChanges: false,
+  },
+
+  // Electron support (Phase 1 MVP)
+  electron: {
+    isRunning: false,
+    currentFolder: null,
+    currentFolderFiles: [],
+    isDirty: false,
+    currentFilePath: null,
+  },
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_TEXTAREA_SIZE_BYTES = 5 * 1024 * 1024; // 5MB max for editor
 const MAX_SEARCH_LENGTH = 100; // Prevent DoS from massive search queries
 const MAX_MATCHES = 1000; // Prevent memory crash from too many matches
 const SEARCH_DEBOUNCE_MS = 250; // Wait 250ms after user stops typing
+const EDIT_SAVE_DEBOUNCE_MS = 500; // Wait 500ms after user stops typing before auto-save
+const EDIT_STATS_DEBOUNCE_MS = 150; // Wait 150ms before updating stats (less frequent)
 const ALLOWED_EXTENSIONS = [".md", ".markdown", ".txt"];
 const ALLOWED_MIME_TYPES = ["text/plain", "text/markdown", ""];
 
@@ -39,8 +58,212 @@ const searchPrevBtn = document.getElementById("search-prev-btn");
 const searchNextBtn = document.getElementById("search-next-btn");
 const searchClearBtn = document.getElementById("search-clear-btn");
 
-// Search debouncing
+// Edit mode DOM references
+const editBtn = document.getElementById("edit-btn");
+const saveEditBtn = document.getElementById("save-edit-btn");
+const cancelEditBtn = document.getElementById("cancel-edit-btn");
+const previewEditBtn = document.getElementById("preview-edit-btn");
+const editorEl = document.getElementById("editor");
+const editorTextarea = document.getElementById("editor-textarea");
+const wordCountEl = document.getElementById("word-count");
+const charCountEl = document.getElementById("char-count");
+
+// Debounce timers
 let searchTimeout;
+let editSaveTimeout;
+let editStatsTimeout;
+
+// Mutex to prevent concurrent saves
+let editSaveInProgress = false;
+
+// ========== Electron Support (Phase 1 MVP) ==========
+// Initialize Electron mode if running in Electron
+if (typeof window !== 'undefined' && window.electronAPI) {
+  appState.electron.isRunning = true;
+  console.log('[Electron] App running in Electron mode');
+
+  // Initialize Electron features
+  async function initElectron() {
+    try {
+      // Load app configuration from ~/.appconfig
+      const configResult = await window.electronAPI.readConfig();
+      if (configResult.success && configResult.config) {
+        appState.electron.currentFolder = configResult.config.lastFolderPath;
+        appState.electron.currentFilePath = configResult.config.lastOpenedFile;
+        console.log('[Electron] Loaded config:', configResult.config);
+
+        // Auto-load last folder if it exists
+        if (appState.electron.currentFolder) {
+          await loadFolderFromElectron(appState.electron.currentFolder);
+        }
+      }
+    } catch (error) {
+      console.error('[Electron] Error initializing Electron:', error);
+    }
+  }
+
+  // Load and populate folder in Electron mode
+  async function loadFolderFromElectron(folderPath) {
+    try {
+      // Validate folder path
+      if (!folderPath || typeof folderPath !== 'string') {
+        throw new Error('Invalid folder path provided');
+      }
+
+      const result = await window.electronAPI.scanFolder(folderPath);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to scan folder');
+      }
+
+      if (!result.files || !Array.isArray(result.files)) {
+        throw new Error('Invalid response from scanFolder');
+      }
+
+      appState.electron.currentFolderFiles = result.files;
+      appState.electron.currentFolder = folderPath;
+
+      // Filter and map markdown files only
+      const markdownFiles = result.files.filter(f =>
+        !f.isDirectory && (
+          f.name.endsWith('.md') ||
+          f.name.endsWith('.markdown') ||
+          f.name.endsWith('.txt')
+        )
+      );
+
+      appState.files = markdownFiles.map((f, index) => ({
+        id: `file-${Date.now()}-${index}`,
+        name: f.name,
+        path: f.path,
+        relativePath: f.relativePath,
+        size: 0,
+        loadedAt: new Date().toISOString(),
+        content: '',
+      }));
+
+      console.log('[Electron] Loaded folder with', appState.files.length, 'markdown files');
+      renderFileList();
+    } catch (error) {
+      showError('[Electron] Failed to load folder: ' + error.message);
+      console.error('[Electron] Error in loadFolderFromElectron:', error);
+    }
+  }
+
+  // Initialize Electron when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initElectron();
+      setupElectronUI();
+    });
+  } else {
+    initElectron();
+    setupElectronUI();
+  }
+
+  // Setup Electron UI elements
+  function setupElectronUI() {
+    // Show Browse Folder button
+    const browseBtn = document.getElementById('electron-browse-btn');
+    if (browseBtn) {
+      browseBtn.style.display = 'inline-block';
+      browseBtn.addEventListener('click', openFolderDialogElectron);
+    }
+  }
+
+  // Listen for menu events (Cmd+O, Cmd+S)
+  if (window.electronAPI.onOpenFolder) {
+    window.electronAPI.onOpenFolder(() => {
+      console.log('[Electron] Menu: Open Folder (Cmd+O)');
+      openFolderDialogElectron();
+    });
+  }
+
+  if (window.electronAPI.onSave) {
+    window.electronAPI.onSave(() => {
+      console.log('[Electron] Menu: Save (Cmd+S)');
+      if (appState.electron.isDirty && appState.currentFile) {
+        savingCurrentFileElectron();
+      }
+    });
+  }
+}
+
+// Open folder picker in Electron
+async function openFolderDialogElectron() {
+  try {
+    const result = await window.electronAPI.selectFolder();
+    if (result.cancelled) {
+      console.log('[Electron] Folder selection cancelled');
+      return;
+    }
+
+    if (result.success && result.path) {
+      try {
+        await loadFolderFromElectron(result.path);
+        console.log('[Electron] Folder loaded successfully:', result.path);
+
+        // Save to config
+        const configResult = await window.electronAPI.readConfig();
+        const newConfig = configResult.config || {};
+        newConfig.lastFolderPath = result.path;
+        await window.electronAPI.writeConfig(newConfig);
+      } catch (error) {
+        showError('[Electron] Failed to load folder: ' + error.message);
+      }
+    } else if (!result.success) {
+      showError('[Electron] Folder selection error: ' + (result.error || 'Unknown error'));
+    }
+  } catch (error) {
+    showError('[Electron] Error opening folder: ' + error.message);
+    console.error('[Electron] Error opening folder:', error);
+  }
+}
+
+// Show error message to user
+function showError(message) {
+  if (fileErrorEl) {
+    fileErrorEl.textContent = message;
+    fileErrorEl.style.display = 'block';
+    setTimeout(() => {
+      fileErrorEl.style.display = 'none';
+    }, 5000);
+  } else {
+    console.error('[Error]', message);
+  }
+}
+
+// Save current file in Electron
+async function savingCurrentFileElectron() {
+  if (!appState.electron.currentFilePath) {
+    console.warn('[Electron] No file path selected');
+    return;
+  }
+
+  try {
+    const content = editorTextarea.value;
+
+    // Validate content size (max 5MB)
+    if (content.length > 5 * 1024 * 1024) {
+      showError('[Electron] File too large to save (max 5MB)');
+      return;
+    }
+
+    const result = await window.electronAPI.writeFile(
+      appState.electron.currentFilePath,
+      content
+    );
+
+    if (result.success) {
+      appState.electron.isDirty = false;
+      console.log('[Electron] File saved successfully');
+    } else if (!result.success) {
+      showError('[Electron] Failed to save file: ' + (result.error || 'Unknown error'));
+    }
+  } catch (error) {
+    showError('[Electron] Error saving file: ' + error.message);
+    console.error('[Electron] Error in savingCurrentFileElectron:', error);
+  }
+}
 
 // Render batching to prevent excessive DOM updates
 let pendingRender = false;
@@ -98,16 +321,18 @@ function updateFileInfo(file) {
   if (!file) {
     fileInfoEl.textContent = "No file loaded.";
     fileInfoEl.classList.add("file-info--empty");
-    // Disable export button
+    // Disable export and edit buttons
     if (exportPdfBtn) exportPdfBtn.disabled = true;
+    if (editBtn) editBtn.disabled = true;
     return;
   }
 
   fileInfoEl.classList.remove("file-info--empty");
   // Use textContent to safely display filename (prevents XSS)
   fileInfoEl.textContent = `${file.name} · ${formatFileSize(file.size)}`;
-  // Enable export button
+  // Enable export and edit buttons
   if (exportPdfBtn) exportPdfBtn.disabled = false;
+  if (editBtn) editBtn.disabled = false;
 }
 
 function validateFile(file) {
@@ -196,6 +421,236 @@ function exportToPDF() {
   }
 }
 
+// ============================================================================
+// EDIT MODE FUNCTIONS
+// ============================================================================
+
+/**
+ * Enters edit mode for the current file
+ * Backs up content and shows the editor textarea
+ */
+function enterEditMode() {
+  if (!appState.currentFile) return;
+
+  // Validate content size
+  if (appState.currentFile.content.length > MAX_TEXTAREA_SIZE_BYTES) {
+    showError("File is too large to edit (max 5MB).");
+    return;
+  }
+
+  appState.edit.isActive = true;
+  appState.edit.originalContent = appState.currentFile.content;
+  appState.edit.hasUnsavedChanges = false;
+
+  // Simply make the preview editable — same text, same place, just editable
+  if (previewEl) {
+    previewEl.contentEditable = 'true';
+    previewEl.focus();
+
+    // Track changes
+    previewEl.addEventListener('input', function onEdit() {
+      appState.edit.hasUnsavedChanges = true;
+    });
+
+    // Just let contentEditable handle copy/paste natively
+    // No custom handlers needed
+  }
+
+  // Update button visibility using CSS classes
+  if (editBtn) editBtn.classList.add('editor-btn--hidden');
+  if (saveEditBtn) saveEditBtn.classList.remove('editor-btn--hidden');
+  if (cancelEditBtn) cancelEditBtn.classList.remove('editor-btn--hidden');
+  if (previewEditBtn) previewEditBtn.classList.remove('editor-btn--hidden');
+  if (exportPdfBtn) exportPdfBtn.disabled = true;
+
+  // Clear search when entering edit mode
+  clearSearch();
+  if (searchInput) searchInput.disabled = true;
+
+  updateEditorStats();
+  clearError();
+}
+
+/**
+ * Exits edit mode
+ * @param {boolean} saveChanges - Whether to save changes before exiting
+ */
+function exitEditMode(saveChanges) {
+  if (!appState.edit.isActive) return;
+
+  // Turn off editing — content stays exactly as it looks
+  if (previewEl) {
+    previewEl.contentEditable = 'false';
+
+    // Save the edited content
+    if (saveChanges && appState.currentFile) {
+      // Convert edited HTML back to proper Markdown using Turndown
+      let markdownContent;
+      if (window.TurndownService) {
+        const turndown = new TurndownService({
+          headingStyle: 'atx',
+          codeBlockStyle: 'fenced',
+          bulletListMarker: '-',
+        });
+        markdownContent = turndown.turndown(previewEl.innerHTML);
+      } else {
+        // Fallback if Turndown not loaded
+        markdownContent = previewEl.innerText;
+      }
+
+      appState.currentFile.content = markdownContent;
+      saveToStorage();
+
+      // Save to actual file on disk in Electron mode
+      if (appState.electron.isRunning && appState.currentFile.path) {
+        window.electronAPI.writeFile(
+          appState.currentFile.path,
+          markdownContent
+        ).then(result => {
+          if (result.success) {
+            console.log('[Electron] File saved to disk as .md:', appState.currentFile.path);
+          } else {
+            console.error('[Electron] Failed to save:', result.error);
+          }
+        });
+      }
+    }
+  }
+
+  appState.edit.isActive = false;
+  appState.edit.hasUnsavedChanges = false;
+  appState.edit.originalContent = "";
+
+  // Update button visibility using CSS classes
+  if (editBtn) editBtn.classList.remove('editor-btn--hidden');
+  if (saveEditBtn) saveEditBtn.classList.add('editor-btn--hidden');
+  if (cancelEditBtn) cancelEditBtn.classList.add('editor-btn--hidden');
+  if (previewEditBtn) previewEditBtn.classList.add('editor-btn--hidden');
+  if (exportPdfBtn) exportPdfBtn.disabled = false;
+
+  // Re-enable search
+  if (searchInput && appState.currentFile) searchInput.disabled = false;
+
+  clearError();
+}
+
+/**
+ * Auto-saves changes after a debounce period
+ * Debounce prevents excessive saves during rapid typing
+ * Mutex prevents concurrent save operations
+ */
+function autoSaveEdit() {
+  if (!appState.edit.isActive || !appState.currentFile) return;
+
+  // Clear any pending auto-save
+  clearTimeout(editSaveTimeout);
+
+  // Schedule new auto-save
+  editSaveTimeout = setTimeout(() => {
+    if (appState.edit.isActive && appState.edit.hasUnsavedChanges && !editSaveInProgress) {
+      editSaveInProgress = true;
+      try {
+        appState.currentFile.content = editorTextarea.value;
+        const success = saveToStorage();
+        if (!success) {
+          showError("Failed to save (storage full). Your changes are not saved.");
+          // Keep unsaved flag so user knows changes aren't saved
+          return;
+        }
+        appState.edit.hasUnsavedChanges = false;
+      } finally {
+        editSaveInProgress = false;
+      }
+    }
+  }, EDIT_SAVE_DEBOUNCE_MS);
+}
+
+/**
+ * Explicitly saves changes without debounce
+ * Called when user clicks Save button
+ * Mutex prevents concurrent saves
+ */
+function saveEdit() {
+  if (!appState.edit.isActive || !appState.currentFile) return;
+
+  // Prevent concurrent saves
+  if (editSaveInProgress) return;
+  editSaveInProgress = true;
+
+  try {
+    // Clear any pending auto-save
+    clearTimeout(editSaveTimeout);
+
+    // Save immediately
+    appState.currentFile.content = editorTextarea.value;
+    const success = saveToStorage();
+
+    if (!success) {
+      showError("Failed to save (storage full). Your changes are not saved.");
+      return;
+    }
+
+    appState.edit.hasUnsavedChanges = false;
+    clearError();
+  } finally {
+    editSaveInProgress = false;
+  }
+}
+
+/**
+ * Toggles between editor and preview modes
+ */
+function togglePreview() {
+  if (!appState.edit.isActive) return;
+  // With contentEditable, toggle is just save and exit
+  exitEditMode(true);
+}
+
+/**
+ * Updates word and character count statistics
+ * Called frequently but execution is debounced to 150ms
+ */
+function updateEditorStats() {
+  if (!editorTextarea) return;
+
+  const content = editorTextarea.value;
+
+  // Count characters
+  const charCount = content.length;
+  if (charCountEl) {
+    charCountEl.textContent = `${charCount} character${charCount !== 1 ? 's' : ''}`;
+  }
+
+  // Count words (split by whitespace)
+  const wordCount = content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+  if (wordCountEl) {
+    wordCountEl.textContent = `${wordCount} word${wordCount !== 1 ? 's' : ''}`;
+  }
+}
+
+/**
+ * Debounced stats update to reduce calculations on every keystroke
+ * Only updates at most every 150ms instead of on every input event
+ */
+function debouncedUpdateEditorStats() {
+  clearTimeout(editStatsTimeout);
+  editStatsTimeout = setTimeout(() => {
+    updateEditorStats();
+  }, EDIT_STATS_DEBOUNCE_MS);
+}
+
+/**
+ * Confirms with user if there are unsaved changes
+ * Returns true if user confirms discard, false if user cancels
+ */
+function confirmDiscardChanges() {
+  if (!appState.edit.hasUnsavedChanges) return true;
+
+  return confirm(
+    "You have unsaved changes. Do you want to discard them?"
+  );
+}
+
 function handleFile(file) {
   if (!validateFile(file)) {
     return;
@@ -253,6 +708,15 @@ function handleFile(file) {
  * @param {string} fileId - The file ID to select
  */
 function selectFile(fileId) {
+  // Check for unsaved changes in edit mode
+  if (appState.edit.isActive && appState.edit.hasUnsavedChanges) {
+    if (!confirmDiscardChanges()) {
+      return; // User cancelled, don't switch files
+    }
+    // User confirmed discard, exit edit mode without saving
+    exitEditMode(false);
+  }
+
   const file = appState.files.find(f => f.id === fileId);
   if (!file) return;
 
@@ -1025,16 +1489,111 @@ if (exportPdfBtn) {
   exportPdfBtn.addEventListener("click", exportToPDF);
 }
 
-// Global keyboard shortcut for search: Ctrl+F or Cmd+F
+// Edit mode button wiring
+if (editBtn) {
+  editBtn.addEventListener("click", enterEditMode);
+}
+
+if (saveEditBtn) {
+  saveEditBtn.addEventListener("click", () => {
+    saveEdit();
+  });
+}
+
+if (cancelEditBtn) {
+  cancelEditBtn.addEventListener("click", () => {
+    if (confirmDiscardChanges()) {
+      exitEditMode(false);
+    }
+  });
+}
+
+if (previewEditBtn) {
+  previewEditBtn.addEventListener("click", togglePreview);
+}
+
+// Editor textarea event wiring
+if (editorTextarea) {
+  editorTextarea.addEventListener("input", () => {
+    const currentContent = editorTextarea.value;
+
+    // Validate content size to prevent memory issues
+    if (currentContent.length > MAX_TEXTAREA_SIZE_BYTES) {
+      showError("Content is too large (max 5MB). Some content will be lost.");
+      editorTextarea.value = currentContent.substring(0, MAX_TEXTAREA_SIZE_BYTES);
+      return;
+    }
+
+    appState.edit.hasUnsavedChanges = currentContent !== appState.edit.originalContent;
+    debouncedUpdateEditorStats(); // Use debounced version for performance
+    autoSaveEdit();
+  });
+
+  // Handle Tab key to insert tab character instead of leaving field
+  editorTextarea.addEventListener("keydown", (event) => {
+    if (event.key === "Tab") {
+      event.preventDefault();
+      const start = editorTextarea.selectionStart;
+      const end = editorTextarea.selectionEnd;
+      const text = editorTextarea.value;
+      editorTextarea.value = text.substring(0, start) + "\t" + text.substring(end);
+      editorTextarea.selectionStart = editorTextarea.selectionEnd = start + 1;
+      appState.edit.hasUnsavedChanges = true;
+      debouncedUpdateEditorStats();
+      autoSaveEdit(); // Trigger auto-save like normal input events do
+    }
+  });
+}
+
+// Global keyboard shortcuts for edit mode
 document.addEventListener("keydown", (event) => {
   // Security: Only respond to genuine user keyboard events, not synthetic ones
   if (!event.isTrusted) return;
 
+  // Ctrl+E or Cmd+E: Toggle edit mode
+  if ((event.ctrlKey || event.metaKey) && event.key === "e") {
+    event.preventDefault();
+    if (!appState.currentFile) return;
+
+    if (appState.edit.isActive) {
+      if (confirmDiscardChanges()) {
+        exitEditMode(false);
+      }
+    } else {
+      enterEditMode();
+    }
+    return;
+  }
+
+  // Ctrl+S or Cmd+S: Save while editing
+  if ((event.ctrlKey || event.metaKey) && event.key === "s") {
+    event.preventDefault();
+    if (appState.edit.isActive) {
+      saveEdit();
+    }
+    return;
+  }
+
+  // Escape: Save and exit edit mode
+  if (event.key === "Escape") {
+    if (appState.edit.isActive) {
+      event.preventDefault();
+      exitEditMode(true);
+    } else if (searchInput === document.activeElement) {
+      event.preventDefault();
+      clearSearch();
+      searchInput.blur();
+    }
+    return;
+  }
+
+  // Ctrl+F or Cmd+F: Focus search (original search shortcut)
   if ((event.ctrlKey || event.metaKey) && event.key === "f") {
     event.preventDefault();
-    if (appState.currentFile && searchInput) {
+    if (appState.currentFile && searchInput && !appState.edit.isActive) {
       searchInput.focus();
     }
+    return;
   }
 });
 
@@ -1149,7 +1708,7 @@ function initApp() {
   // Check storage usage
   const usage = getStorageUsagePercent();
   if (usage > 80) {
-    showError(`⚠️ Storage nearly full (${usage}%). Consider exporting your library.`);
+    showError("Storage is nearly full. Consider deleting some files to free up space.");
   }
 }
 

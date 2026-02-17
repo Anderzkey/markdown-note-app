@@ -63,6 +63,50 @@
             📄 Export PDF
           </button>
 
+          <button
+            id="edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Edit markdown"
+            title="Edit current document"
+            disabled
+          >
+            ✏️ Edit
+          </button>
+
+          <button
+            id="save-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Save changes"
+            title="Save current changes"
+            style="display: none;"
+          >
+            💾 Save
+          </button>
+
+          <button
+            id="cancel-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Cancel editing"
+            title="Discard changes and exit edit mode"
+            style="display: none;"
+          >
+            ✕ Cancel
+          </button>
+
+          <button
+            id="preview-edit-btn"
+            type="button"
+            class="export-button"
+            aria-label="Toggle preview"
+            title="Switch between editor and preview"
+            style="display: none;"
+          >
+            👁️ Preview
+          </button>
+
           <label class="file-button">
             <input
               id="file-input"
@@ -120,7 +164,15 @@
       <div class="app-body">
         <aside class="sidebar">
           <section class="file-library">
-            <h3>Files <span class="count">(0)</span></h3>
+            <div class="file-library-header">
+              <h3>Files <span class="count">(0)</span></h3>
+              <button
+                id="electron-browse-btn"
+                class="browse-folder-btn"
+                title="Browse folder (Cmd+O)"
+                style="display: none;"
+              >📁 Browse</button>
+            </div>
             <div class="file-list"></div>
           </section>
 
@@ -162,6 +214,26 @@
             />
           </section>
 
+          <!-- Old editor section hidden - editing now happens inline inside preview -->
+          <section
+            id="editor"
+            class="editor"
+            style="display: none !important;"
+            aria-label="Markdown editor"
+          >
+            <textarea
+              id="editor-textarea"
+              class="editor-textarea"
+              placeholder="Edit your markdown here..."
+              aria-label="Markdown editor textarea"
+            ></textarea>
+            <div class="editor-stats">
+              <span id="word-count">0 words</span>
+              <span class="editor-stats-separator">·</span>
+              <span id="char-count">0 characters</span>
+            </div>
+          </section>
+
           <section
             id="preview"
             class="preview"
@@ -200,8 +272,21 @@ console.log(hello);
     <!-- html2pdf for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
+    <!-- Turndown: converts edited HTML back to Markdown when saving -->
+    <script src="https://cdn.jsdelivr.net/npm/turndown@7.1.3/dist/turndown.min.js"></script>
+
     <!-- Storage layer (persistence) -->
     <script src="storage.js"></script>
+
+    <!-- Electron IPC bridge (if running in Electron) -->
+    <script>
+      // Check if running in Electron
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        window.isElectron = true;
+      } else {
+        window.isElectron = false;
+      }
+    </script>
 
     <!-- App logic -->
     <script src="app.js"></script>
