@@ -164,7 +164,15 @@
       <div class="app-body">
         <aside class="sidebar">
           <section class="file-library">
-            <h3>Files <span class="count">(0)</span></h3>
+            <div class="file-library-header">
+              <h3>Files <span class="count">(0)</span></h3>
+              <button
+                id="electron-browse-btn"
+                class="browse-folder-btn"
+                title="Browse folder (Cmd+O)"
+                style="display: none;"
+              >📁 Browse</button>
+            </div>
             <div class="file-list"></div>
           </section>
 
@@ -265,6 +273,16 @@ console.log(hello);
 
     <!-- Storage layer (persistence) -->
     <script src="storage.js"></script>
+
+    <!-- Electron IPC bridge (if running in Electron) -->
+    <script>
+      // Check if running in Electron
+      if (typeof window !== 'undefined' && window.electronAPI) {
+        window.isElectron = true;
+      } else {
+        window.isElectron = false;
+      }
+    </script>
 
     <!-- App logic -->
     <script src="app.js"></script>

@@ -22,6 +22,15 @@ const appState = {
     originalContent: "",
     hasUnsavedChanges: false,
   },
+
+  // Electron support (Phase 1 MVP)
+  electron: {
+    isRunning: false,
+    currentFolder: null,
+    currentFolderFiles: [],
+    isDirty: false,
+    currentFilePath: null,
+  },
 };
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -66,6 +75,195 @@ let editStatsTimeout;
 
 // Mutex to prevent concurrent saves
 let editSaveInProgress = false;
+
+// ========== Electron Support (Phase 1 MVP) ==========
+// Initialize Electron mode if running in Electron
+if (typeof window !== 'undefined' && window.electronAPI) {
+  appState.electron.isRunning = true;
+  console.log('[Electron] App running in Electron mode');
+
+  // Initialize Electron features
+  async function initElectron() {
+    try {
+      // Load app configuration from ~/.appconfig
+      const configResult = await window.electronAPI.readConfig();
+      if (configResult.success && configResult.config) {
+        appState.electron.currentFolder = configResult.config.lastFolderPath;
+        appState.electron.currentFilePath = configResult.config.lastOpenedFile;
+        console.log('[Electron] Loaded config:', configResult.config);
+
+        // Auto-load last folder if it exists
+        if (appState.electron.currentFolder) {
+          await loadFolderFromElectron(appState.electron.currentFolder);
+        }
+      }
+    } catch (error) {
+      console.error('[Electron] Error initializing Electron:', error);
+    }
+  }
+
+  // Load and populate folder in Electron mode
+  async function loadFolderFromElectron(folderPath) {
+    try {
+      // Validate folder path
+      if (!folderPath || typeof folderPath !== 'string') {
+        throw new Error('Invalid folder path provided');
+      }
+
+      const result = await window.electronAPI.scanFolder(folderPath);
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to scan folder');
+      }
+
+      if (!result.files || !Array.isArray(result.files)) {
+        throw new Error('Invalid response from scanFolder');
+      }
+
+      appState.electron.currentFolderFiles = result.files;
+      appState.electron.currentFolder = folderPath;
+
+      // Filter and map markdown files only
+      const markdownFiles = result.files.filter(f =>
+        !f.isDirectory && (
+          f.name.endsWith('.md') ||
+          f.name.endsWith('.markdown') ||
+          f.name.endsWith('.txt')
+        )
+      );
+
+      appState.files = markdownFiles.map((f, index) => ({
+        id: `file-${Date.now()}-${index}`,
+        name: f.name,
+        path: f.path,
+        relativePath: f.relativePath,
+        size: 0,
+        loadedAt: new Date().toISOString(),
+        content: '',
+      }));
+
+      console.log('[Electron] Loaded folder with', appState.files.length, 'markdown files');
+      renderFileList();
+    } catch (error) {
+      showError('[Electron] Failed to load folder: ' + error.message);
+      console.error('[Electron] Error in loadFolderFromElectron:', error);
+    }
+  }
+
+  // Initialize Electron when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      initElectron();
+      setupElectronUI();
+    });
+  } else {
+    initElectron();
+    setupElectronUI();
+  }
+
+  // Setup Electron UI elements
+  function setupElectronUI() {
+    // Show Browse Folder button
+    const browseBtn = document.getElementById('electron-browse-btn');
+    if (browseBtn) {
+      browseBtn.style.display = 'inline-block';
+      browseBtn.addEventListener('click', openFolderDialogElectron);
+    }
+  }
+
+  // Listen for menu events (Cmd+O, Cmd+S)
+  if (window.electronAPI.onOpenFolder) {
+    window.electronAPI.onOpenFolder(() => {
+      console.log('[Electron] Menu: Open Folder (Cmd+O)');
+      openFolderDialogElectron();
+    });
+  }
+
+  if (window.electronAPI.onSave) {
+    window.electronAPI.onSave(() => {
+      console.log('[Electron] Menu: Save (Cmd+S)');
+      if (appState.electron.isDirty && appState.currentFile) {
+        savingCurrentFileElectron();
+      }
+    });
+  }
+}
+
+// Open folder picker in Electron
+async function openFolderDialogElectron() {
+  try {
+    const result = await window.electronAPI.selectFolder();
+    if (result.cancelled) {
+      console.log('[Electron] Folder selection cancelled');
+      return;
+    }
+
+    if (result.success && result.path) {
+      try {
+        await loadFolderFromElectron(result.path);
+        console.log('[Electron] Folder loaded successfully:', result.path);
+
+        // Save to config
+        const configResult = await window.electronAPI.readConfig();
+        const newConfig = configResult.config || {};
+        newConfig.lastFolderPath = result.path;
+        await window.electronAPI.writeConfig(newConfig);
+      } catch (error) {
+        showError('[Electron] Failed to load folder: ' + error.message);
+      }
+    } else if (!result.success) {
+      showError('[Electron] Folder selection error: ' + (result.error || 'Unknown error'));
+    }
+  } catch (error) {
+    showError('[Electron] Error opening folder: ' + error.message);
+    console.error('[Electron] Error opening folder:', error);
+  }
+}
+
+// Show error message to user
+function showError(message) {
+  if (fileErrorEl) {
+    fileErrorEl.textContent = message;
+    fileErrorEl.style.display = 'block';
+    setTimeout(() => {
+      fileErrorEl.style.display = 'none';
+    }, 5000);
+  } else {
+    console.error('[Error]', message);
+  }
+}
+
+// Save current file in Electron
+async function savingCurrentFileElectron() {
+  if (!appState.electron.currentFilePath) {
+    console.warn('[Electron] No file path selected');
+    return;
+  }
+
+  try {
+    const content = editorTextarea.value;
+
+    // Validate content size (max 5MB)
+    if (content.length > 5 * 1024 * 1024) {
+      showError('[Electron] File too large to save (max 5MB)');
+      return;
+    }
+
+    const result = await window.electronAPI.writeFile(
+      appState.electron.currentFilePath,
+      content
+    );
+
+    if (result.success) {
+      appState.electron.isDirty = false;
+      console.log('[Electron] File saved successfully');
+    } else if (!result.success) {
+      showError('[Electron] Failed to save file: ' + (result.error || 'Unknown error'));
+    }
+  } catch (error) {
+    showError('[Electron] Error saving file: ' + error.message);
+    console.error('[Electron] Error in savingCurrentFileElectron:', error);
+  }
+}
 
 // Render batching to prevent excessive DOM updates
 let pendingRender = false;
