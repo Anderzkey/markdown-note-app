@@ -214,10 +214,11 @@
             />
           </section>
 
+          <!-- Old editor section hidden - editing now happens inline inside preview -->
           <section
             id="editor"
             class="editor"
-            style="display: none;"
+            style="display: none !important;"
             aria-label="Markdown editor"
           >
             <textarea
@@ -270,6 +271,9 @@ console.log(hello);
 
     <!-- html2pdf for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <!-- Turndown: converts edited HTML back to Markdown when saving -->
+    <script src="https://cdn.jsdelivr.net/npm/turndown@7.1.3/dist/turndown.min.js"></script>
 
     <!-- Storage layer (persistence) -->
     <script src="storage.js"></script>

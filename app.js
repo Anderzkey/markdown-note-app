@@ -442,12 +442,15 @@ function enterEditMode() {
   appState.edit.originalContent = appState.currentFile.content;
   appState.edit.hasUnsavedChanges = false;
 
-  // Hide preview, show editor
-  if (previewEl) previewEl.style.display = "none";
-  if (editorEl) editorEl.style.display = "flex";
-  if (editorTextarea) {
-    editorTextarea.value = appState.currentFile.content;
-    editorTextarea.focus();
+  // Simply make the preview editable — same text, same place, just editable
+  if (previewEl) {
+    previewEl.contentEditable = 'true';
+    previewEl.focus();
+
+    // Track changes
+    previewEl.addEventListener('input', function onEdit() {
+      appState.edit.hasUnsavedChanges = true;
+    });
   }
 
   // Update button visibility using CSS classes
@@ -472,23 +475,48 @@ function enterEditMode() {
 function exitEditMode(saveChanges) {
   if (!appState.edit.isActive) return;
 
-  if (saveChanges && appState.edit.hasUnsavedChanges) {
-    appState.currentFile.content = editorTextarea.value;
-    saveToStorage();
+  // Turn off editing — content stays exactly as it looks
+  if (previewEl) {
+    previewEl.contentEditable = 'false';
+
+    // Save the edited content
+    if (saveChanges && appState.currentFile) {
+      // Convert edited HTML back to proper Markdown using Turndown
+      let markdownContent;
+      if (window.TurndownService) {
+        const turndown = new TurndownService({
+          headingStyle: 'atx',
+          codeBlockStyle: 'fenced',
+          bulletListMarker: '-',
+        });
+        markdownContent = turndown.turndown(previewEl.innerHTML);
+      } else {
+        // Fallback if Turndown not loaded
+        markdownContent = previewEl.innerText;
+      }
+
+      appState.currentFile.content = markdownContent;
+      saveToStorage();
+
+      // Save to actual file on disk in Electron mode
+      if (appState.electron.isRunning && appState.currentFile.path) {
+        window.electronAPI.writeFile(
+          appState.currentFile.path,
+          markdownContent
+        ).then(result => {
+          if (result.success) {
+            console.log('[Electron] File saved to disk as .md:', appState.currentFile.path);
+          } else {
+            console.error('[Electron] Failed to save:', result.error);
+          }
+        });
+      }
+    }
   }
 
   appState.edit.isActive = false;
   appState.edit.hasUnsavedChanges = false;
   appState.edit.originalContent = "";
-
-  // Show preview, hide editor
-  if (editorEl) editorEl.style.display = "none";
-  if (previewEl) previewEl.style.display = "block";
-
-  // Render updated markdown if changes were saved
-  if (saveChanges && appState.currentFile) {
-    renderMarkdown(appState.currentFile.content);
-  }
 
   // Update button visibility using CSS classes
   if (editBtn) editBtn.classList.remove('editor-btn--hidden');
@@ -571,23 +599,8 @@ function saveEdit() {
  */
 function togglePreview() {
   if (!appState.edit.isActive) return;
-
-  const isEditorVisible = editorEl.style.display !== "none";
-
-  if (isEditorVisible) {
-    // Switch to preview
-    if (editorEl) editorEl.style.display = "none";
-    if (previewEl) previewEl.style.display = "block";
-
-    // Render current markdown from textarea (not saved)
-    const currentContent = editorTextarea.value;
-    renderMarkdown(currentContent);
-  } else {
-    // Switch to editor
-    if (editorEl) editorEl.style.display = "flex";
-    if (previewEl) previewEl.style.display = "none";
-    if (editorTextarea) editorTextarea.focus();
-  }
+  // With contentEditable, toggle is just save and exit
+  exitEditMode(true);
 }
 
 /**
@@ -1558,13 +1571,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  // Escape: Exit edit mode
+  // Escape: Save and exit edit mode
   if (event.key === "Escape") {
     if (appState.edit.isActive) {
       event.preventDefault();
-      if (confirmDiscardChanges()) {
-        exitEditMode(false);
-      }
+      exitEditMode(true);
     } else if (searchInput === document.activeElement) {
       event.preventDefault();
       clearSearch();
